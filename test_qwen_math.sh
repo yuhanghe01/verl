@@ -1,4 +1,4 @@
-PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
+torchrun --nnodes=2 --nproc_per_node=8 -m verl.trainer.main_ppo \
  data.train_files=/mnt/blob-data-sigmasystem/yuhang/gsm8k/train.parquet \
  data.val_files=/mnt/blob-data-sigmasystem/yuhang/gsm8k/test.parquet \
  data.train_batch_size=256 \
