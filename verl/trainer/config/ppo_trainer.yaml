@@ -25,9 +25,9 @@ actor_rollout_ref:
   actor:
     micro_batch_size_per_gpu: 4
     strategy: fsdp
-    ppo_mini_batch_size: 256
+    ppo_mini_batch_size: 64
     ppo_micro_batch_size: null
-    ppo_micro_batch_size_per_gpu: null
+    ppo_micro_batch_size_per_gpu: 4
     use_dynamic_bsz: False
     ppo_max_token_len_per_gpu: 16384
     grad_clip: 1.0
@@ -70,17 +70,17 @@ actor_rollout_ref:
     prompt_length: ${data.max_prompt_length}
     response_length: ${data.max_response_length}
     dtype: bfloat16
-    gpu_memory_utilization: 0.5
+    gpu_memory_utilization: 0.4
     ignore_eos: False
     enforce_eager: True
     free_cache_engine: True
     load_format: dummy_dtensor
-    tensor_model_parallel_size: 2
+    tensor_model_parallel_size: 1
     max_num_batched_tokens: 8192
     max_model_len: null
     max_num_seqs: 1024
     log_prob_micro_batch_size: null
-    log_prob_micro_batch_size_per_gpu: null
+    log_prob_micro_batch_size_per_gpu: 8
     log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
     log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
     disable_log_stats: True
@@ -111,7 +111,7 @@ critic:
       fsdp_size: -1
   ppo_mini_batch_size: ${actor_rollout_ref.actor.ppo_mini_batch_size}
   ppo_micro_batch_size: null # will be deprecated, use ppo_micro_batch_size_per_gpu
-  ppo_micro_batch_size_per_gpu: null
+  ppo_micro_batch_size_per_gpu: 4
   forward_micro_batch_size: ${critic.ppo_micro_batch_size}
   forward_micro_batch_size_per_gpu: ${critic.ppo_micro_batch_size_per_gpu}
   use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
@@ -157,18 +157,19 @@ algorithm:
     kl_coef: 0.001
 
 trainer:
+  val_before_train: False
   total_epochs: 15
   total_training_steps: null
   project_name: verl_examples
   experiment_name: gsm8k
-  logger: [ 'console', 'wandb' ]
+  logger: [ 'console']
   val_generations_to_log_to_wandb: 0
-  nnodes: 1
+  nnodes: 2
   n_gpus_per_node: 8
-  save_freq: -1
+  save_freq: 50
   resume_mode: auto
   resume_from_path: False
-  test_freq: -1
+  test_freq: 50
   critic_warmup: 0
   default_hdfs_dir: null
   remove_previous_ckpt_in_save: False
