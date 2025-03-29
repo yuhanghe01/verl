@@ -21,8 +21,8 @@ class SimpleModel(nn.Module):
 
 # Initialize model and move to multiple GPUs
 model = SimpleModel()
-if num_gpus > 1:
-    model = nn.DataParallel(model)
+#if num_gpus > 1:
+#    model = nn.DataParallel(model)
 model = model.to("cuda")
 
 # Create dummy data
