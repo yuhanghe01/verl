@@ -30,6 +30,8 @@ x = torch.randn(16, 10).to("cuda")
 y = torch.randn(16, 1).to("cuda")
 
 # Define loss and optimizer
+
+print('BEGIN THE TRAINING PROCESS')
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
 
