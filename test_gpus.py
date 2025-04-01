@@ -1,55 +1,34 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.utils.data as data
-from torchvision import datasets, transforms
 
-# Check if multiple GPUs are available
-device = torch.device("cuda" if torch.cuda.device_count() > 1 else "cpu")
+def test_amd_multigpu():
+    if not torch.cuda.is_available():
+        print("CUDA is not available. Ensure that ROCm is installed and PyTorch is built with ROCm support.")
+        return
 
-# Define a simple model
-class SimpleModel(nn.Module):
-    def __init__(self):
-        super(SimpleModel, self).__init__()
-        self.fc = nn.Linear(28 * 28, 10)
-
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        return self.fc(x)
-
-# Load dataset
-transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
-train_dataset = datasets.MNIST(root="./data", train=True, transform=transform, download=True)
-train_loader = data.DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=4)
-
-# Initialize model and wrap it with DataParallel if multiple GPUs are available
-model = SimpleModel()
-if torch.cuda.device_count() > 1:
-    print(f"Using {torch.cuda.device_count()} GPUs!")
-    model = nn.DataParallel(model)
-
-model.to(device)
-
-# Define loss function and optimizer
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-# Training loop
-epochs = 5
-for epoch in range(epochs):
-    model.train()
-    running_loss = 0.0
-    for inputs, labels in train_loader:
-        inputs, labels = inputs.to(device), labels.to(device)
-
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-
-        running_loss += loss.item()
+    num_gpus = torch.cuda.device_count()
+    print(f"Number of AMD GPUs detected: {num_gpus}")
     
-    print(f"Epoch {epoch+1}/{epochs}, Loss: {running_loss/len(train_loader):.4f}")
+    if num_gpus < 2:
+        print("Less than 2 GPUs detected. Ensure multiple AMD GPUs are available.")
+        return
 
-print("Training complete!")
+    try:
+        # Create a tensor and distribute across multiple GPUs
+        tensors = [torch.ones(10, device=f'cuda:{i}') for i in range(num_gpus)]
+        
+        # Perform basic computation
+        results = [t * 2 for t in tensors]
+        
+        # Verify computation
+        for i, res in enumerate(results):
+            if not torch.all(res == 2):
+                print(f"Computation failed on GPU {i}")
+                return
+
+        print("All AMD GPUs are working correctly.")
+    
+    except Exception as e:
+        print(f"Error encountered during multi-GPU test: {e}")
+
+if __name__ == "__main__":
+    test_amd_multigpu()
