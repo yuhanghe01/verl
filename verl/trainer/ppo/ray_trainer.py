@@ -103,6 +103,12 @@ class ResourcePoolManager:
         print('############## node_available_resources info: ############')
         print(node_available_resources)
         print('Done!############')
+        print('######## cluster resources info #######')
+        print(ray.cluster_resources())
+        print('Done!##########')
+        print('######nodes info #######')
+        print(ray.nodes())
+        print('Done!########')
 
         # check total required gpus can be satisfied
         total_available_gpus = sum(node_available_gpus.values())
