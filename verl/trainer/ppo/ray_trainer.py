@@ -695,6 +695,9 @@ class RayPPOTrainer(object):
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
 
+            AccuRate = float(sum(scores))/(len(scores) + 0.00001)
+            print('AccuRate: {}'.format(AccuRate))
+
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
 
