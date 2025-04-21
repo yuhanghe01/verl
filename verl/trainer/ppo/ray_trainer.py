@@ -100,15 +100,15 @@ class ResourcePoolManager:
         """Check if the resource pool can be satisfied in this ray cluster."""
         node_available_resources = ray.state.available_resources_per_node()
         node_available_gpus = {node: node_info.get('GPU', 0) for node, node_info in node_available_resources.items()}
-        print('############## node_available_resources info: ############')
-        print(node_available_resources)
-        print('Done!############')
-        print('######## cluster resources info #######')
-        print(ray.cluster_resources())
-        print('Done!##########')
-        print('######nodes info #######')
-        print(ray.nodes())
-        print('Done!########')
+        logging.INFO('############## node_available_resources info: ############')
+        logging.INFO(node_available_resources)
+        logging.INFO('Done!############')
+        logging.INFO('######## cluster resources info #######')
+        logging.INFO(ray.cluster_resources())
+        logging.INFO('Done!##########')
+        logging.INFO('######nodes info #######')
+        logging.INFO(ray.nodes())
+        logging.INFO('Done!########')
 
         # check total required gpus can be satisfied
         total_available_gpus = sum(node_available_gpus.values())
@@ -696,7 +696,7 @@ class RayPPOTrainer(object):
             sample_scores.extend(scores)
 
             AccuRate = float(sum(scores))/(len(scores) + 0.00001)
-            print('AccuRate: {}'.format(AccuRate))
+            logging.INFO('AccuRate: {}'.format(AccuRate))
 
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
