@@ -24,6 +24,7 @@ from enum import Enum
 from pprint import pprint
 from typing import Type, Dict
 from copy import deepcopy
+import logging
 
 import ray
 import numpy as np
