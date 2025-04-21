@@ -101,15 +101,15 @@ class ResourcePoolManager:
         """Check if the resource pool can be satisfied in this ray cluster."""
         node_available_resources = ray.state.available_resources_per_node()
         node_available_gpus = {node: node_info.get('GPU', 0) for node, node_info in node_available_resources.items()}
-        logging.INFO('############## node_available_resources info: ############')
-        logging.INFO(node_available_resources)
-        logging.INFO('Done!############')
-        logging.INFO('######## cluster resources info #######')
-        logging.INFO(ray.cluster_resources())
-        logging.INFO('Done!##########')
-        logging.INFO('######nodes info #######')
-        logging.INFO(ray.nodes())
-        logging.INFO('Done!########')
+        logging.info('############## node_available_resources info: ############')
+        logging.info(node_available_resources)
+        logging.info('Done!############')
+        logging.info('######## cluster resources info #######')
+        logging.info(ray.cluster_resources())
+        logging.info('Done!##########')
+        logging.info('######nodes info #######')
+        logging.info(ray.nodes())
+        logging.info('Done!########')
 
         # check total required gpus can be satisfied
         total_available_gpus = sum(node_available_gpus.values())
