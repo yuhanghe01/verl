@@ -12,7 +12,7 @@ torchrun --nnodes=1  --nproc_per_node=8 -m verl.trainer.fsdp_sft_trainer \
 	model.partial_pretrain=$MODEL_NAME \
         trainer.project_name=system-sft \
 	trainer.experiment_name=system-7B \
-        rainer.total_epochs=50 \
+        trainer.total_epochs=50 \
 	trainer.default_local_dir=$ckpt_dir \
         trainer.logger=['console'] \
 	trainer.default_hdfs_dir=null
