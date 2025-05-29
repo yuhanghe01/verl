@@ -29,7 +29,6 @@ from verl.utils import hf_tokenizer
 from verl.utils.fs import copy_to_local
 from verl.utils.model import compute_position_id_with_mask
 
-
 class SFTDataset(Dataset):
     """
     This is an in-memory SFTDataset
@@ -71,6 +70,13 @@ class SFTDataset(Dataset):
         for i, parquet_file in enumerate(self.parquet_files):
             self.parquet_files[i] = copy_to_local(parquet_file, verbose=True)
 
+    # def series_to_item(self, ls):
+    #     import numpy
+    #     import pandas
+    #     while isinstance(ls, (pandas.core.series.Series, numpy.ndarray)) and len(ls) == 1:
+    #         ls = ls[0]
+    #     return ls
+
     def _read_files_and_tokenize(self):
         def series_to_item(ls):
             import numpy
@@ -86,21 +92,37 @@ class SFTDataset(Dataset):
             dataframe = pd.read_parquet(parquet_file)
             dataframes.append(dataframe)
         self.dataframe = pd.concat(dataframes)
-        self.prompts = self.dataframe[self.prompt_key]
+        self.prompts = self.dataframe[self.prompt_key[0]]
         for key in self.prompt_dict_keys:
             # type(x): pandas.core.series.Series
             # type(x[0]): numpy.ndarray
             # type(x[0][0]): dict
+            # breakpoint()
             try:
-                self.prompts = self.prompts.apply(lambda x: series_to_item(x)[key], axis=1)  # noqa: B023
+                # self.prompts = self.prompts.apply(lambda x:series_to_item(x)[key], axis=1)  # noqa: B023
+                self.prompts = self.prompts.apply(lambda x:series_to_item(x)[key])  # noqa: B023
+                # self.prompts = self.prompts.apply(lambda x: series_to_item(x)[key], axis = 1)
+                # new_prompts = []
+                # for x in self.prompts:
+                #     item = series_to_item(x)
+                #     value = item[key]
+                #     new_prompts.append(value)
+                # self.prompts = pd.Series(new_prompts)
             except Exception:
                 print(f"self.prompts={self.prompts}")
                 raise
         self.prompts = self.prompts.tolist()
-        self.responses = self.dataframe[self.response_key]
+        self.responses = self.dataframe[self.response_key[0]]
         for key in self.response_dict_keys:
             try:
-                self.responses = self.responses.apply(lambda x: series_to_item(x)[key], axis=1)  # noqa: B023
+                #self.responses = self.responses.apply(lambda x: self.series_to_item(x)[key], axis=1)  # noqa: B023
+                #self.responses = self.responses.apply(lambda x: self.series_to_item(x)[key])  # noqa: B023
+                new_responses = []
+                for x in self.responses:
+                    item = series_to_item(x)
+                    value = item[key]
+                    new_responses.append(value)
+                self.responses = pd.Series(new_responses)
             except Exception:
                 print(f"self.responses={self.responses}")
                 raise
