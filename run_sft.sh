@@ -9,8 +9,8 @@ torchrun --nnodes=1  --nproc_per_node=8 -m verl.trainer.fsdp_sft_trainer \
         data.val_files=$test_file \
 	data.prompt_key=prompt \
         data.response_key=answer \
-	data.train_batch_size=32 \
-        data.micro_batch_size_per_gpu=4 \
+	data.train_batch_size=16 \
+        data.micro_batch_size_per_gpu=2 \
 	data.truncation=right \
 	data.max_length=4096 \
 	model.partial_pretrain=$MODEL_NAME \
