@@ -1,7 +1,9 @@
-export PYTHONPATH=$(pwd):${PYTHONPATH:-}
+MODEL_NAME=Qwen/Qwen2.5-7B-Instruct
+python -c "import transformers; transformers.pipeline('text-generation',model='Qwen/Qwen2-7B-Instruct')"
 train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_train_data.parquet
 test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_test_data.parquet
 ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data
+
 torchrun --nnodes=1  --nproc_per_node=8 -m verl.trainer.fsdp_sft_trainer \
 	data.train_files=$train_file \
         data.val_files=$test_file \
