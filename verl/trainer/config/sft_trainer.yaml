@@ -1,7 +1,7 @@
 data:
-  train_batch_size: 256
+  train_batch_size: 2
   micro_batch_size: null # will be deprecated, use micro_batch_size_per_gpu
-  micro_batch_size_per_gpu: 4  # this is also val batch size
+  micro_batch_size_per_gpu: 2  # this is also val batch size
   train_files: ~/data/gsm8k/train.parquet
   val_files: ~/data/gsm8k/test.parquet
   # Single-turn settings
@@ -14,14 +14,14 @@ data:
     enable: false  # Set to true to use multi-turn dataset
     messages_key: messages  # Key for messages list in multi-turn mode
   max_length: 1024
-  truncation: error
+  truncation: right
   balance_dp_token: False
   chat_template: null
   custom_cls:
     path: null
     name: null
 model:
-  partial_pretrain: ~/models/gemma-1.1-7b-it
+  partial_pretrain: /datadisk/SFT/gsm8k_SFT/global_step_1572
   fsdp_config:
     wrap_policy:
       min_num_params: 0
@@ -53,4 +53,5 @@ trainer:
   total_training_steps: null
   logger: ['console']
   seed: 1
+  mode: inference #['inference', 'train']
 

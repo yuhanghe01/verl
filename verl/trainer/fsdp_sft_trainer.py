@@ -57,7 +57,6 @@ from verl.utils.ulysses import (
 from verl.utils.device import get_device_name, get_torch_device, is_cuda_available, is_npu_available
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 
-
 if is_cuda_available:
     from flash_attn.bert_padding import pad_input, unpad_input, rearrange, index_first_axis
 elif is_npu_available:
@@ -66,13 +65,11 @@ elif is_npu_available:
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_SFT_LOGGING_LEVEL", "WARN"))
 
-
 def extract_step(path):
     match = re.search(r"global_step_(\d+)", path)
     if match:
         return int(match.group(1))
     return None
-
 
 def convert_to_regular_types(obj):
     """Convert Hydra configs and other special types to regular Python types."""
@@ -131,7 +128,6 @@ class FSDPSFTTrainer:
         # build dataset
         config = self.config
         self.train_dataset, self.val_dataset = train_dataset, val_dataset
-
         # build dataloader
         # Use data parallel rank and size instead of global rank and world size
 
@@ -281,6 +277,87 @@ class FSDPSFTTrainer:
             self.lr_scheduler = get_wsd_schedule_with_warmup(optimizer=self.optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=self.total_steps)
         else:
             raise ValueError(f"Unknown lr scheduler: {self.config.optim.lr_scheduler}")
+        
+    def _run_inference_gsm8k(self, batch):
+        """Compute loss with optional sequence parallelism and remove padding features"""
+        use_sp = self.use_remove_padding and self.config.ulysses_sequence_parallel_size > 1
+
+        # Move inputs to GPU and prepare loss mask
+        input_ids = batch["input_ids"].to(self.device_name)
+        attention_mask = batch["attention_mask"].to(self.device_name)
+        position_ids = batch["position_ids"].to(self.device_name)
+        loss_mask = batch.pop("loss_mask")[:, :-1].reshape(-1).to(self.device_name)
+        loss_fct = nn.CrossEntropyLoss(reduction="none")
+
+        # Context manager for sequence parallel if needed
+        context = self.sharding_manager if use_sp else nullcontext()
+        with context, torch.autocast(device_type=self.device_name, dtype=torch.bfloat16):
+            if not use_sp:
+                # Standard forward pass without sequence parallel
+                labels = input_ids[:, 1:].contiguous()
+                self.fsdp_model.eval()
+                with torch.no_grad():
+                    output = self.fsdp_model(input_ids=input_ids, 
+                                             attention_mask=attention_mask, 
+                                             position_ids=position_ids, 
+                                             use_cache=False)
+                    
+                logits = output.logits
+
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = labels.contiguous()
+                # Flatten the tokens
+                shift_logits = shift_logits.view(-1, self.model.config.vocab_size)
+                shift_labels = shift_labels.view(-1)
+                # Enable model parallelism
+                shift_labels = shift_labels.to(shift_logits.device)
+
+                pred_label = torch.argmax(torch.nn.functional.softmax(shift_logits, dim=-1), dim=-1)
+
+                accu_num = torch.sum((pred_label == shift_labels).to(torch.float32)).item()
+                total_num = shift_labels.numel()
+
+                return accu_num, total_num
+            else:
+                # IMPORTANT: We have a big assumption here, so we can shard the SAME sequence across SP ranks
+                # i.e., each GPU has <1 sequence, and each SP group has 1 sequence
+                # 1. All SP ranks will receive the *SAME* batch
+                # 2. Different SP groups will receive *DIFFERENT* batches
+                # This is implemented by the DistributedSampler
+                batch_size, seqlen = input_ids.shape
+                # Remove padding
+                input_ids_rmpad, indices, *_ = unpad_input(input_ids.unsqueeze(-1), attention_mask)  # input_ids_rmpad (total_nnz, ...)
+                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
+
+                # Unpad position_ids to align rotary
+                position_ids_rmpad = index_first_axis(rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices).transpose(0, 1)
+
+                # Pad and slice inputs for sequence parallelism
+                input_ids_rmpad_sliced, position_ids_rmpad_padded, pad_size = ulysses_pad_and_slice_inputs(input_ids_rmpad, position_ids_rmpad, sp_size=get_ulysses_sequence_parallel_world_size())
+                # For computing loss
+                input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=1)  # (1, total_nnz)
+                input_ids_rmpad_rolled, _, _ = ulysses_pad_and_slice_inputs(input_ids_rmpad_rolled, None, get_ulysses_sequence_parallel_world_size())
+                input_ids_rmpad_rolled = input_ids_rmpad_rolled.squeeze(0)  # ((total_nnz / sp) + pad)
+
+                # Forward pass
+                self.fsdp_model.eval()
+                with torch.no_grad():
+                    output = self.fsdp_model(
+                        input_ids=input_ids_rmpad_sliced,
+                        attention_mask=None,  # Not needed with flash attention varlen
+                        position_ids=position_ids_rmpad_padded,
+                        use_cache=False,
+                    )
+
+                # Compute loss locally then aggregate
+                logits_rmpad = output.logits.squeeze(0)
+                input_ids_rmpad_rolled = input_ids_rmpad_rolled.to(logits_rmpad.device)
+
+                pred_label = torch.argmax(torch.nn.functional.softmax(logits_rmpad, dim=-1), dim=-1)
+                accu_num = torch.sum((pred_label == input_ids_rmpad_rolled).to(torch.float32)).item()
+                total_num = input_ids_rmpad_rolled.numel()
+
+                return accu_num, total_num
 
     def _compute_loss_and_backward(self, batch, do_backward=True):
         """Compute loss with optional sequence parallelism and remove padding features"""
@@ -497,6 +574,7 @@ class FSDPSFTTrainer:
 
                     # Save final checkpoint
                     self.save_checkpoint(step=global_step)
+
                     return
 
             # validation
@@ -513,6 +591,28 @@ class FSDPSFTTrainer:
 
             # save checkpoint
             self.save_checkpoint(step=global_step)
+
+    def eval_gsm8k(self):
+        """Evaluate the model on the validation set."""
+        rank = self.device_mesh.get_rank()
+        if rank == 0:
+            print("Evaluating the model on the validation set...")
+
+        accu_num, total_num = 0., 0.
+        for data in tqdm(self.val_dataloader, desc="Validation"):
+            data = TensorDict(data, batch_size=self.config.data.micro_batch_size_per_gpu).to(self.device_name)
+            accu_num_tmp, total_num_tmp = self._run_inference_gsm8k(data)
+            accu_num += accu_num_tmp
+            total_num += total_num_tmp
+
+        if rank == 0:
+            accuracy = accu_num / total_num if total_num > 0 else 0.0
+            print(f"Validation accuracy: {accuracy:.4f} ({accu_num}/{total_num})")
+
+            return accuracy
+        
+
+
 
 
 @hydra.main(config_path="config", config_name="sft_trainer", version_base=None)
@@ -533,7 +633,10 @@ def main(config):
 
     trainer = FSDPSFTTrainer(config=config, device_mesh=device_mesh, ulysses_device_mesh=ulysses_device_mesh, tokenizer=tokenizer, train_dataset=train_dataset, val_dataset=val_dataset)
 
-    trainer.fit()
+    if config.trainer.mode == 'inference':
+        trainer.eval_gsm8k()
+    else:
+        trainer.fit()
 
 
 def create_sft_dataset(data_paths, data_config, tokenizer):
