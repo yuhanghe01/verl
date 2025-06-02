@@ -7,7 +7,6 @@ import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.wrap import default_auto_wrap_policy
 
 
 # ---------- Dummy model and dataset ----------
