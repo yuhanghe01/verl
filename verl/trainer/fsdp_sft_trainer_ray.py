@@ -269,7 +269,8 @@ class FSDPSFTTrainer:
 @hydra.main(config_path="config", config_name="sft_trainer", version_base=None)
 def main(config):
     device_name = get_device_name()
-    local_rank, rank, world_size = initialize_global_process_group()
+    #local_rank, rank, world_size = initialize_global_process_group()
+    world_size = 16
 
     device_mesh = init_device_mesh(device_type=device_name, 
                                    mesh_shape=(world_size,), 
