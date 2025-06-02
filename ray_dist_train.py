@@ -1,16 +1,11 @@
 import os
+import ray
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.distributed as dist
-import ray
-from ray.train._internal.worker_group import WorkerGroup
-from ray.train._internal.resource_pool import RayResourcePool
-from ray.train._internal.worker_group import _RayWorkerGroup
-from ray.train._internal.session import _set_internal_session
-from ray.air.util.check_ingress import RayClassWithInitArgs
 
-# ----------- Dummy model and dataset ------------
+# ---------- Dummy model and dataset ----------
 
 class SimpleModel(nn.Module):
     def __init__(self):
@@ -31,29 +26,28 @@ class RandomDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         return self.x[idx], self.y[idx]
 
-# ---------- Per-worker class for training -----------
+# ---------- Training Actor Class ----------
 
-class Worker:
+@ray.remote(num_cpus=2, num_gpus=1)
+class TrainerWorker:
     def __init__(self, rank, world_size, master_addr, master_port):
         self.rank = rank
         self.world_size = world_size
         self.master_addr = master_addr
         self.master_port = master_port
 
-    def setup(self):
+    def setup_distributed(self):
         os.environ["RANK"] = str(self.rank)
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["MASTER_ADDR"] = self.master_addr
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        dist.init_process_group(backend="nccl")
+        dist.init_process_group("nccl")
         torch.cuda.set_device(self.rank % torch.cuda.device_count())
-        print(f"[Rank {self.rank}] initialized on GPU {torch.cuda.current_device()}.")
 
-    def train(self):
-        self.setup()
-        rank = self.rank
-        device = torch.device("cuda", rank % torch.cuda.device_count())
+    def train(self, num_epochs=3):
+        self.setup_distributed()
+        device = torch.device("cuda", self.rank % torch.cuda.device_count())
 
         model = SimpleModel().to(device)
         model = nn.parallel.DistributedDataParallel(model, device_ids=[device])
@@ -62,70 +56,48 @@ class Worker:
 
         dataset = RandomDataset()
         sampler = torch.utils.data.distributed.DistributedSampler(
-            dataset, num_replicas=self.world_size, rank=rank)
+            dataset, num_replicas=self.world_size, rank=self.rank)
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=64, sampler=sampler)
 
-        for epoch in range(3):
+        for epoch in range(num_epochs):
             total_loss = 0.0
             for x, y in dataloader:
                 x, y = x.to(device), y.to(device)
                 optimizer.zero_grad()
-                pred = model(x)
-                loss = loss_fn(pred, y)
+                loss = loss_fn(model(x), y)
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
-            print(f"[Rank {rank}] Epoch {epoch}, Loss: {total_loss:.4f}")
+            print(f"[Rank {self.rank}] Epoch {epoch}, Loss: {total_loss:.4f}")
 
         dist.destroy_process_group()
+        return f"Rank {self.rank} finished training."
 
-# ------------- Ray training orchestration --------------
+# ---------- Main Launcher ----------
 
 def main():
     ray.init(address="auto")  # connect to existing Ray cluster
 
-    world_size = 16  # 8 GPUs x 2 nodes
+    world_size = 16
     master_addr = os.environ.get("MASTER_ADDR", "127.0.0.1")
     master_port = os.environ.get("MASTER_PORT", "23456")
 
-    print(f"Launching {world_size} training workers...")
+    print(f"Launching {world_size} Ray actor workers...")
 
-    ray_worker_cls = RayClassWithInitArgs(
-        Worker,
-        init_kwargs={
-            "rank": 0,  # placeholder, will override below
-            "world_size": world_size,
-            "master_addr": master_addr,
-            "master_port": master_port
-        }
-    )
+    # Create remote actors
+    workers = [
+        TrainerWorker.remote(rank=i, world_size=world_size,
+                             master_addr=master_addr, master_port=master_port)
+        for i in range(world_size)
+    ]
 
-    # Create 16 workers (each needs 1 GPU)
-    pool = RayResourcePool(
-        ray_worker_cls,
-        num_workers=world_size,
-        resources_per_worker={"CPU": 2, "GPU": 1},
-        max_concurrent_tasks=1,
-    )
-    pool.start()
+    # Trigger training in parallel
+    futures = [w.train.remote(num_epochs=3) for w in workers]
+    results = ray.get(futures)
 
-    # Assign rank manually to each actor
-    workers = pool.get_workers()
-    for rank, w in enumerate(workers):
-        w.__ray_actor__.update_init_args.remote(
-            init_kwargs={
-                "rank": rank,
-                "world_size": world_size,
-                "master_addr": master_addr,
-                "master_port": master_port,
-            }
-        )
-
-    worker_group = WorkerGroup(workers)
-    worker_group.execute(lambda w: w.train())
-
-    print("Distributed training completed.")
-    pool.shutdown()
+    for r in results:
+        print(r)
 
 if __name__ == "__main__":
     main()
+
