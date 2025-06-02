@@ -270,7 +270,8 @@ class FSDPSFTTrainer:
 def main(config):
     device_name = get_device_name()
     #local_rank, rank, world_size = initialize_global_process_group()
-    world_size = 16
+    #world_size = 16
+    world_size = torch.distributed.get_world_size()
 
     device_mesh = init_device_mesh(device_type=device_name, 
                                    mesh_shape=(world_size,), 
