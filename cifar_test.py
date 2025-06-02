@@ -97,7 +97,12 @@ def train(gpu, args, trainset):
                'dog', 'frog', 'horse', 'ship', 'truck')
     start = datetime.now()
     total_step = len(trainloader)
+    if gpu == 0:
+        print('enter into epoch')
     for epoch in range(args.epochs):
+        if rank == 0 or gpu == 0:
+            print('epoch id: {}'.format(epoch))
+	
         for i, (images, labels) in enumerate(trainloader):
             images = images.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
@@ -110,7 +115,8 @@ def train(gpu, args, trainset):
             loss.backward()
             optimizer.step()
             #if (i + 1) % 100 == 0 and gpu == 0:
-            print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(epoch + 1, args.epochs, i + 1, total_step,
+            if gpu == 0:
+                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(epoch + 1, args.epochs, i + 1, total_step,
                                                                          loss.item()))
     if gpu == 0:
         print("Training complete in: " + str(datetime.now() - start))
