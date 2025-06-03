@@ -59,6 +59,17 @@ def convert_to_regular_types(obj):
     
     return obj
 
+
+device_name = get_device_name()
+
+def create_device_mesh(world_size, fsdp_size):
+    if fsdp_size < 0 or fsdp_size >= world_size:
+        device_mesh = init_device_mesh(device_name, mesh_shape=(world_size,), mesh_dim_names=["fsdp"])
+    else:
+        device_mesh = init_device_mesh(device_name, mesh_shape=(world_size // fsdp_size, fsdp_size), mesh_dim_names=["ddp", "fsdp"])
+
+    return device_mesh
+
 class FSDPSFTTrainer:
     def __init__(self, 
                  config,
@@ -268,14 +279,14 @@ class FSDPSFTTrainer:
 
 @hydra.main(config_path="config", config_name="sft_trainer", version_base=None)
 def main(config):
-    device_name = get_device_name()
-    #local_rank, rank, world_size = initialize_global_process_group()
-    #world_size = 16
+    # local_rank, rank, world_size = initialize_global_process_group()
     world_size = torch.distributed.get_world_size()
 
-    device_mesh = init_device_mesh(device_type=device_name, 
-                                   mesh_shape=(world_size,), 
-                                   mesh_dim_names=("fsdp",))
+
+    # device_mesh = init_device_mesh(device_type=device_name, 
+    #                                mesh_shape=(world_size,), 
+    #                                mesh_dim_names=("fsdp",))
+    device_mesh = create_device_mesh(world_size, fsdp_size=-1)
     
     dp_size = world_size // config.ulysses_sequence_parallel_size
     ulysses_device_mesh = init_device_mesh(device_type=device_name, 
