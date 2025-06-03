@@ -280,7 +280,7 @@ class FSDPSFTTrainer:
 @hydra.main(config_path="config", config_name="sft_trainer", version_base=None)
 def main(config):
     # local_rank, rank, world_size = initialize_global_process_group()
-    world_size = torch.distributed.get_world_size()
+    world_size = 16
 
 
     # device_mesh = init_device_mesh(device_type=device_name, 
