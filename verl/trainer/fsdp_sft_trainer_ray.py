@@ -282,6 +282,10 @@ def main(config):
     # local_rank, rank, world_size = initialize_global_process_group()
     world_size = 16
 
+    import torch.distributed as dist
+    dist.init_process_group(backend="nccl")  # or "gloo" for CPU
+
+
 
     # device_mesh = init_device_mesh(device_type=device_name, 
     #                                mesh_shape=(world_size,), 
