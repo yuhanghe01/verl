@@ -11,7 +11,6 @@ import numpy as np
 import ray
 import torch
 from codetiming import Timer
-from tensordict import TensorDict
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from verl.single_controller.base import Worker

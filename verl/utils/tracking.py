@@ -40,13 +40,12 @@ class Tracking:
 
         if "tracking" in default_backend or "wandb" in default_backend:
             import wandb
-
+            wandb.login(key=os.environ.get("WANDB_API_KEY", None))
             wandb.init(project=project_name, name=experiment_name, config=config)
             self.logger["wandb"] = wandb
 
         if "mlflow" in default_backend:
             import os
-
             import mlflow
 
             MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", None)

@@ -50,7 +50,8 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Se
 from verl.utils.model import get_generation_config, print_model_size, update_model_config
 from verl.utils.torch_dtypes import PrecisionType
 from verl.utils.torch_functional import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
-
+from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
+from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad_and_slice_inputs, get_ulysses_sequence_parallel_world_size
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
@@ -106,7 +107,6 @@ class SFTLMWorker(Worker):
 
         self._is_offload_param = self.config.model.fsdp_config.get("param_offload", False)
         self._is_offload_optimizer = self.config.model.fsdp_config.get("optimizer_offload", False)
-
 
     def create_sft_dataset(self, data_paths, data_config, tokenizer):
         """Create a dataset."""
@@ -182,9 +182,6 @@ class SFTLMWorker(Worker):
         model_path = self.config.model.model_path
         local_model_path = copy_to_local(model_path)
 
-        # self.tokenizer = hf_tokenizer(local_model_path,
-        #                               trust_remote_code=trust_remote_code)
-
         log_gpu_memory_usage("before model allocation", logger=logger)
 
         self.processor = hf_processor(local_model_path, 
@@ -197,7 +194,6 @@ class SFTLMWorker(Worker):
         model_config = AutoConfig.from_pretrained(local_model_path, 
                                                   trust_remote_code=trust_remote_code)
         self.model_config = model_config
-
         if self.config.ulysses_sequence_parallel_size > 1:
             assert self.config.model.use_remove_padding, "Ulysses Sequence Parallel requires use_remove_padding to be True"
 
@@ -301,7 +297,7 @@ class SFTLMWorker(Worker):
                 "reshard_after_forward": self.config.model.fsdp_config.reshard_after_forward,
             }
             full_state = self.model.state_dict()
-            apply_fsdp2(self.model, fsdp_kwargs, fsdp_config)
+            apply_fsdp2(self.model, fsdp_kwargs, self.config.model.fsdp_config)
             fsdp2_load_full_state_dict(self.model, full_state, fsdp_mesh, cpu_offload)
         else:
             raise NotImplementedError(f"not implement {fsdp_strategy}")
@@ -372,29 +368,55 @@ class SFTLMWorker(Worker):
         # step 3: initialize dataloader
 
     def save_checkpoint(self):
-        # if self._is_offload_param:
-        #     load_fsdp_model_to_gpu(self.module_fsdp)
-
         local_path = os.path.join(self.config.trainer.ckpt_save_dir, f"global_step_{self.global_steps}")
-        os.makedirs(local_path, exist_ok=True)    
+        os.makedirs(local_path, exist_ok=True)
+        # if self.config.model.fsdp_config.fsdp_strategy == "fsdp":
+        #     #FSDP1 checkpoint saving
+        #     from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+        #     cfg = FullStateDictConfig(offload_to_cpu = True, rank0_only = True)
+        #     with FSDP.state_dict_type(self.fsdp_model, StateDictType.FULL_STATE_DICT, full_state_dict_config=cfg):
+        #         fsdp_state_dict = self.fsdp_model.state_dict()
+
+        #     # save huggingface model
+        #     if self.device_mesh.get_rank() == 0:
+        #         self.fsdp_model.save_pretrained(local_path, state_dict=fsdp_state_dict)
+        #         self.tokenizer.save_pretrained(local_path)
+        #         # fsdp_state_dict = fsdp_state_dict.to(device_name)
+        #         # torch.save(fsdp_state_dict, os.path.join(local_path, "model.pt"))
+        #     # Save the full state dict for FSDP2
+        #     # fsdp2_state_dict = self.fsdp_model.state_dict(full_state=True)
+        #     # fsdp2_state_dict = fsdp2_state_dict.to(device_name)
+        #     # torch.save(fsdp2_state_dict, os.path.join(local_path, "model.pt"))  
+        # elif self.config.model.fsdp_config.fsdp_strategy == "fsdp2":
+        #     from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict
+
+        #     #get full state dict with FSDP2
+        #     options = StateDictOptions(offload_to_cpu=True, cpu_offload=True)
+        #     state_dict = get_model_state_dict(self.fsdp_model, options=options)
+
+        #     if self.device_mesh.get_rank() == 0:
+        #         # Save the model and tokenizer
+        #         self.fsdp_model.save_pretrained(local_path, state_dict=state_dict)
+        #         self.model_config.save_pretrained(local_path)
+        #         self.tokenizer.save_pretrained(local_path)
+        # else:
+        #     raise NotImplementedError(f"not implement {self.config.model.fsdp_config.fsdp_strategy}")
         self.checkpoint_manager.save_checkpoint(local_path=local_path, 
                                                 hdfs_path=None, 
                                                 global_step=self.global_steps, 
                                                 max_ckpt_to_keep=self.config.trainer.max_ckpt_to_keep)
 
-        torch.distributed.barrier()
+        # torch.distributed.barrier()
 
         # if self._is_offload_param:
         #     offload_fsdp_model_to_cpu(self.module_fsdp)
 
     def run_inference_gsm8k(self):
         """Compute loss with optional sequence parallelism and remove padding features"""
-
         use_sp = self.config.model.use_remove_padding and self.config.ulysses_sequence_parallel_size > 1
         self.fsdp_model.eval()
         accu_num, total_num = 0, 0
         for batch_id, batch in enumerate(self.val_dataloader):
-            # print('eval {}/{}'.format(batch_id, len(self.val_dataloader)))
             # Move inputs to GPU and prepare loss mask
             input_ids = batch["input_ids"].to(device_name)
             attention_mask = batch["attention_mask"].to(device_name)
@@ -470,7 +492,8 @@ class SFTLMWorker(Worker):
                     accu_num += accu_num_tmp
                     total_num += total_num_tmp
         accu_rate = accu_num / (total_num + 1e-8)
-        print(f"Validation Accuracy: {accu_rate:.4f}")
+
+        return accu_rate
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def _compute_loss_and_backward(self, batch, do_backward=True):
@@ -482,10 +505,9 @@ class SFTLMWorker(Worker):
         position_ids = batch["position_ids"].to(device_name)
         loss_mask = batch.pop("loss_mask")[:, :-1].reshape(-1).to(device_name)
         loss_fct = nn.CrossEntropyLoss(reduction="none")
-        self.fsdp_model.train()
         context = self.sharding_manager if use_sp else nullcontext()
         # with context, torch.autocast(device_type=device_name, dtype=torch.bfloat16):
-        with context, torch.autocast(device_type=device_name, dtype=torch.float16):
+        with context, torch.autocast(device_type=device_name, dtype=torch.bfloat16):
             if not use_sp:
                 # Standard forward pass without sequence parallel
                 labels = input_ids[:, 1:].contiguous()
@@ -559,20 +581,15 @@ class SFTLMWorker(Worker):
         self.fsdp_model.train()
         log_gpu_memory_usage("Before model_optimizer zero_grad", logger=logger)
         self.model_optimizer.zero_grad()
-
         log_gpu_memory_usage("After optimizer zero_grad", logger=logger)
-
         micro_batches = batch.split(self.config.data.micro_batch_size_per_gpu)
         n_micro_batches = len(micro_batches)
         step_loss = 0
         for micro_batch in micro_batches:
             loss = self._compute_loss_and_backward(batch=micro_batch, do_backward=True) / n_micro_batches
             step_loss += loss.item()
-
         grad_norm = self.fsdp_model.clip_grad_norm_(max_norm=self.config.optim.clip_grad)
-
         log_gpu_memory_usage("Before optimizer step", logger=logger)
-
         # if grad_norm is not finite, skip the update
         if not torch.isfinite(grad_norm):
             print(f"WARN: grad_norm is not finite: {grad_norm}")
@@ -582,8 +599,6 @@ class SFTLMWorker(Worker):
 
         log_gpu_memory_usage("After optimizer step", logger=logger)
 
-        # self.model_lr_scheduler.step()
-
         # reduce loss across dp ranks
         lr = self.model_lr_scheduler.get_last_lr()[0]
 
@@ -591,7 +606,9 @@ class SFTLMWorker(Worker):
         if is_cuda_available:
             torch.distributed.all_reduce(step_loss, op=torch.distributed.ReduceOp.AVG)
         if self.device_mesh.get_rank() == 0:
-            logger.info(f"Step {self.global_steps}, Loss: {step_loss.item():.4f}, LR: {lr:.6f}")
+            logger.info(f"Step {self.global_steps}, "
+                        f"Loss: {step_loss.item():.4f}, "
+                        f"LR: {lr:.6f}")
 
         return step_loss.item()
 
@@ -611,28 +628,47 @@ class SFTLMWorker(Worker):
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def launch_train(self):
+        from omegaconf import OmegaConf
+        from verl.utils.tracking import Tracking
+        
+        track_logger = Tracking(
+            project_name=self.config.trainer.project_name,
+            experiment_name=self.config.trainer.experiment_name,
+            default_backend=self.config.trainer.logger,
+            config=OmegaConf.to_container(self.config, resolve=True),
+        )
         self.global_steps = 0
         progress_bar = tqdm(total=self.total_training_steps,
                     initial=self.global_steps, 
                     desc="Training Progress",)
         
+        metrics = dict()
         for epoch in range(self.config.trainer.total_epochs):
             for batch_id, batch in enumerate(self.train_dataloader):
                 if not isinstance(batch, TensorDict):
                     batch = TensorDict(batch, batch_size=[self.config.data.train_batch_size])
                 batch = batch.to(device_name)
-                self.training_step(batch)
+                loss_val = self.training_step(batch)
                 self.global_steps += 1
                 if batch_id % 10 == 0:
-                    print(f"Epoch {epoch}, Step {self.global_steps}, Loss: {self.training_step(batch):.4f}, LR: {self.model_lr_scheduler.get_last_lr()[0]:.5f}")
+                    log_info = {'train/epoch': epoch,
+                                'train/step': self.global_steps,
+                                'train/loss': loss_val,
+                                'train/lr': self.model_lr_scheduler.get_last_lr()[0]}
+                    track_logger.log(log_info)
+                    metrics.update(log_info)
                     progress_bar.update(10)
             
             if epoch % self.config.trainer.eval_every_n_epochs == 0 and epoch > 0:
-                self.run_inference_gsm8k()
+                accu_rate = self.run_inference_gsm8k()
+                log_info = {'eval/epoch': epoch,
+                            'eval/accu_rate': accu_rate}
+                track_logger.log(log_info)
+                metrics.update(log_info)
             
             if epoch % self.config.trainer.save_every_n_epochs == 0 and epoch > 0:
                 self.save_checkpoint()
-
+                
             self.model_lr_scheduler.step()
 
         progress_bar.close()
