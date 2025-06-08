@@ -368,8 +368,8 @@ class SFTLMWorker(Worker):
         # step 3: initialize dataloader
 
     def save_checkpoint(self):
-        local_path = os.path.join(self.config.trainer.ckpt_save_dir, f"global_step_{self.global_steps}")
-        os.makedirs(local_path, exist_ok=True)
+        # local_path = os.path.join(self.config.trainer.ckpt_save_dir, f"global_step_{self.global_steps}")
+        # os.makedirs(local_path, exist_ok=True)
         # if self.config.model.fsdp_config.fsdp_strategy == "fsdp":
         #     #FSDP1 checkpoint saving
         #     from torch.distributed.fsdp import FullStateDictConfig, StateDictType
@@ -401,13 +401,15 @@ class SFTLMWorker(Worker):
         #         self.tokenizer.save_pretrained(local_path)
         # else:
         #     raise NotImplementedError(f"not implement {self.config.model.fsdp_config.fsdp_strategy}")
-        self.checkpoint_manager.save_checkpoint(local_path=local_path, 
-                                                hdfs_path=None, 
-                                                global_step=self.global_steps, 
-                                                max_ckpt_to_keep=self.config.trainer.max_ckpt_to_keep)
+        if self.device_mesh.get_rank() == 0:
+            local_path = os.path.join(self.config.trainer.ckpt_save_dir, f"global_step_{self.global_steps}")
+            os.makedirs(local_path, exist_ok=True)
+            self.checkpoint_manager.save_checkpoint(local_path=local_path, 
+                                                    hdfs_path=None, 
+                                                    global_step=self.global_steps, 
+                                                    max_ckpt_to_keep=self.config.trainer.max_ckpt_to_keep)
 
         # torch.distributed.barrier()
-
         # if self._is_offload_param:
         #     offload_fsdp_model_to_cpu(self.module_fsdp)
 
@@ -546,7 +548,6 @@ class SFTLMWorker(Worker):
                     position_ids=position_ids_rmpad_padded,
                     use_cache=False,
                 )
-
                 # Compute loss locally then aggregate
                 logits_rmpad = output.logits.squeeze(0)
                 input_ids_rmpad_rolled = input_ids_rmpad_rolled.to(logits_rmpad.device)
@@ -579,38 +580,47 @@ class SFTLMWorker(Worker):
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def training_step(self, batch: TensorDict):
         self.fsdp_model.train()
-        log_gpu_memory_usage("Before model_optimizer zero_grad", logger=logger)
+        # log_gpu_memory_usage("Before model_optimizer zero_grad", logger=logger)
         self.model_optimizer.zero_grad()
-        log_gpu_memory_usage("After optimizer zero_grad", logger=logger)
-        micro_batches = batch.split(self.config.data.micro_batch_size_per_gpu)
-        n_micro_batches = len(micro_batches)
-        step_loss = 0
-        for micro_batch in micro_batches:
-            loss = self._compute_loss_and_backward(batch=micro_batch, do_backward=True) / n_micro_batches
-            step_loss += loss.item()
+
+        loss = self._compute_loss_and_backward(batch=batch, do_backward=True)
         grad_norm = self.fsdp_model.clip_grad_norm_(max_norm=self.config.optim.clip_grad)
-        log_gpu_memory_usage("Before optimizer step", logger=logger)
-        # if grad_norm is not finite, skip the update
         if not torch.isfinite(grad_norm):
-            print(f"WARN: grad_norm is not finite: {grad_norm}")
+            logger.info(f"WARN: grad_norm is not finite: {grad_norm}")
             self.model_optimizer.zero_grad()
         else:
             self.model_optimizer.step()
 
-        log_gpu_memory_usage("After optimizer step", logger=logger)
+        # # log_gpu_memory_usage("After optimizer zero_grad", logger=logger)
+        # micro_batches = batch.split(self.config.data.micro_batch_size_per_gpu)
+        # n_micro_batches = len(micro_batches)
+        # step_loss = 0
+        # for micro_batch in micro_batches:
+        #     loss = self._compute_loss_and_backward(batch=micro_batch, do_backward=True) / n_micro_batches
+        #     step_loss += loss.item()
+        # grad_norm = self.fsdp_model.clip_grad_norm_(max_norm=self.config.optim.clip_grad)
+        # log_gpu_memory_usage("Before optimizer step", logger=logger)
+        # # if grad_norm is not finite, skip the update
+        # if not torch.isfinite(grad_norm):
+        #     print(f"WARN: grad_norm is not finite: {grad_norm}")
+        #     self.model_optimizer.zero_grad()
+        # else:
+        #     self.model_optimizer.step()
 
-        # reduce loss across dp ranks
-        lr = self.model_lr_scheduler.get_last_lr()[0]
+        # log_gpu_memory_usage("After optimizer step", logger=logger)
 
-        step_loss = torch.tensor(step_loss).to(device_name)
-        if is_cuda_available:
-            torch.distributed.all_reduce(step_loss, op=torch.distributed.ReduceOp.AVG)
-        if self.device_mesh.get_rank() == 0:
-            logger.info(f"Step {self.global_steps}, "
-                        f"Loss: {step_loss.item():.4f}, "
-                        f"LR: {lr:.6f}")
+        # # reduce loss across dp ranks
+        # lr = self.model_lr_scheduler.get_last_lr()[0]
 
-        return step_loss.item()
+        # step_loss = torch.tensor(step_loss).to(device_name)
+        # if is_cuda_available:
+        #     torch.distributed.all_reduce(step_loss, op=torch.distributed.ReduceOp.AVG)
+        # if self.device_mesh.get_rank() == 0:
+        #     logger.info(f"Step {self.global_steps}, "
+        #                 f"Loss: {step_loss.item():.4f}, "
+        #                 f"LR: {lr:.6f}")
+
+        return loss
 
     def load_checkpoint(self, local_path, hdfs_path=None, del_local_after_load=False):
         if self._is_offload_param:
@@ -653,7 +663,7 @@ class SFTLMWorker(Worker):
                 if batch_id % 10 == 0:
                     log_info = {'train/epoch': epoch,
                                 'train/step': self.global_steps,
-                                'train/loss': loss_val,
+                                'train/loss': loss_val.item(),
                                 'train/lr': self.model_lr_scheduler.get_last_lr()[0]}
                     track_logger.log(log_info, step=self.global_steps)
                     metrics.update(log_info)

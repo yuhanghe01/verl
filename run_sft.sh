@@ -11,7 +11,7 @@ python \
     data.val_files=$test_file \
     data.prompt_key=prompt \
     data.response_key=answer \
-    data.train_batch_size=96 \
+    data.train_batch_size=128 \
     data.micro_batch_size_per_gpu=6 \
     data.max_length=4000 \
     trainer.project_name=system-sft \
@@ -19,6 +19,6 @@ python \
     trainer.total_epochs=10 \
     trainer.nnodes=2 \
     trainer.n_gpus_per_node=8 \
-    trainer.logger=['console'] \
+    trainer.logger=['console', 'wandb'] \
     trainer.ckpt_save_dir=/datadisk/SFT/gsm8k_SFT \
     trainer.default_hdfs_dir=null
