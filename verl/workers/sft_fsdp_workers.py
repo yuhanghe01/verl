@@ -655,7 +655,7 @@ class SFTLMWorker(Worker):
                                 'train/step': self.global_steps,
                                 'train/loss': loss_val,
                                 'train/lr': self.model_lr_scheduler.get_last_lr()[0]}
-                    track_logger.log(log_info)
+                    track_logger.log(log_info, step=self.global_steps)
                     metrics.update(log_info)
                     progress_bar.update(10)
             
@@ -663,7 +663,7 @@ class SFTLMWorker(Worker):
                 accu_rate = self.run_inference_gsm8k()
                 log_info = {'eval/epoch': epoch,
                             'eval/accu_rate': accu_rate}
-                track_logger.log(log_info)
+                track_logger.log(log_info, step=self.global_steps)
                 metrics.update(log_info)
             
             if epoch % self.config.trainer.save_every_n_epochs == 0 and epoch > 0:
