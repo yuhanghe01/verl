@@ -19,6 +19,6 @@ python \
     trainer.total_epochs=10 \
     trainer.nnodes=2 \
     trainer.n_gpus_per_node=8 \
-    trainer.logger=['console', 'wandb'] \
+    trainer.logger=['console','wandb'] \
     trainer.ckpt_save_dir=/datadisk/SFT/gsm8k_SFT \
     trainer.default_hdfs_dir=null
