@@ -1,9 +1,7 @@
 data:
   train_batch_size: 128
-  micro_batch_size: null # will be deprecated, use micro_batch_size_per_gpu
-  micro_batch_size_per_gpu: 128  # this is also val batch size
-  dataloader_num_workers: 8
-  val_batch_size: 12
+  dataloader_num_workers: 32
+  val_batch_size: 128
   seed: 1
   traindata_shuffle: True
   train_files: ~/data/gsm8k/train.parquet
@@ -64,9 +62,9 @@ trainer:
   default_hdfs_dir: hdfs://tmp/experiments/gsm8k/gemma-1.1-7b-it/ # change the hdfs path here
   resume_path: null
   project_name: gsm8k-sft
-  experiment_name: test
+  experiment_name: gsm8k-experiment
   total_epochs: 50
-  logger: ['console']
+  logger: ['wandb']
   seed: 1
   mode: train #['inference', 'train']
   n_gpus_per_node: 1
