@@ -11,7 +11,7 @@ python \
     data.val_files=$test_file \
     data.prompt_key=prompt \
     data.response_key=answer \
-    data.train_batch_size=96 \
+    data.train_batch_size=64 \
     data.micro_batch_size_per_gpu=6 \
     data.max_length=2000 \
     trainer.project_name=system-sft \
