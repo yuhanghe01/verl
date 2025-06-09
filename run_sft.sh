@@ -13,7 +13,7 @@ python \
     data.response_key=answer \
     data.train_batch_size=96 \
     data.micro_batch_size_per_gpu=6 \
-    data.max_length=4000 \
+    data.max_length=2000 \
     trainer.project_name=system-sft \
     trainer.experiment_name=system-sft \
     trainer.total_epochs=10 \
