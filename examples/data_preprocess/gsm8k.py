@@ -18,10 +18,9 @@ Preprocess the GSM8k dataset to parquet format
 import argparse
 import os
 import re
-
 import datasets
 
-from verl.utils.hdfs_io import copy, makedirs
+# from verl.utils.hdfs_io import copy, makedirs
 
 
 def extract_solution(solution_str):
@@ -63,6 +62,8 @@ if __name__ == "__main__":
                     {
                         "role": "user",
                         "content": question,
+                        "question": question_raw,
+                        "answer": answer_raw
                     }
                 ],
                 "ability": "math",
@@ -73,6 +74,8 @@ if __name__ == "__main__":
                     "answer": answer_raw,
                     "question": question_raw,
                 },
+                # "answer": {'answer': answer_raw}    
+                "answer": answer_raw                                                                                                                                                                                  
             }
             return data
 
@@ -87,7 +90,6 @@ if __name__ == "__main__":
     train_dataset.to_parquet(os.path.join(local_dir, "train.parquet"))
     test_dataset.to_parquet(os.path.join(local_dir, "test.parquet"))
 
-    if hdfs_dir is not None:
-        makedirs(hdfs_dir)
-
-        copy(src=local_dir, dst=hdfs_dir)
+    # if hdfs_dir is not None:
+    #     makedirs(hdfs_dir)
+    #     copy(src=local_dir, dst=hdfs_dir)

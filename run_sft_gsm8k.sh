@@ -1,8 +1,8 @@
 MODEL_NAME=Qwen/Qwen2.5-0.5B-Instruct
 python -c "import transformers; transformers.pipeline('text-generation', model='Qwen/Qwen2.5-0.5B-Instruct')"
 python examples/data_preprocess/gsm8k.py --local_dir ~/data/gsm8k
-train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_train_data.parquet
-test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_test_data.parquet
+#train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_train_data.parquet
+#test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_test_data.parquet
 ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/gsm8k_data_Qwen_0.5B
 
 python \
