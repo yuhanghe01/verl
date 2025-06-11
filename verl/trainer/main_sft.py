@@ -8,6 +8,15 @@ from verl.workers.sft_fsdp_workers import SFTLMWorker
 from verl.trainer.sft.ray_trainer import ResourcePoolManager, Role
 from omegaconf import OmegaConf
 from pprint import pprint
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
+logger = logging.getLogger(__name__)
+logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 @hydra.main(config_path="config", config_name="sft_trainer", version_base=None)
 def main(config):
