@@ -15,8 +15,8 @@ python \
     data.max_length=4096 \
     optim.lr=1e-5 \
     model.model_path=$MODEL_NAME \
-    trainer.project_name=system-sft-qwen2.5-coder-7b \
-    trainer.experiment_name=system-sft-qwen2.5-coder-7b \
+    trainer.project_name=system-sft-qwen2.5-coder-7b-instruct \
+    trainer.experiment_name=system-sft-qwen2.5-coder-7b-instruct \
     trainer.total_epochs=10 \
     trainer.nnodes=3 \
     trainer.n_gpus_per_node=8 \
