@@ -16,7 +16,7 @@ python \
     trainer.project_name=system-sft-qwen2.5-coder-7b \
     trainer.experiment_name=system-sft-qwen2.5-coder-7b \
     trainer.total_epochs=10 \
-    trainer.nnodes=2 \
+    trainer.nnodes=4 \
     trainer.n_gpus_per_node=8 \
     trainer.logger=['wandb'] \
     trainer.ckpt_save_dir=$ckpt_dir \
