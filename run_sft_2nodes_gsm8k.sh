@@ -3,7 +3,7 @@ python -c "import transformers; transformers.pipeline('text-generation', model='
 
 train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_train_data.parquet
 test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_test_data.parquet
-ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data_Qwen2.5-Coder-7B
+ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data_Qwen2.5-0.5B-Instruct
 
 python \
     -m verl.trainer.main_sft \
