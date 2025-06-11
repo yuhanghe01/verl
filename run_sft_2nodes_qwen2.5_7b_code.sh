@@ -11,7 +11,7 @@ python \
     data.val_files=$test_file \
     data.prompt_key=prompt \
     data.response_key=answer \
-    data.train_batch_size=32 \
+    data.train_batch_size=16 \
     data.max_length=4096 \
     trainer.project_name=system-sft-qwen2.5-coder-7b \
     trainer.experiment_name=system-sft-qwen2.5-coder-7b \
