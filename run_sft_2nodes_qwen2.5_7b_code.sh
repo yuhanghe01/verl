@@ -13,6 +13,7 @@ python \
     data.response_key=answer \
     data.train_batch_size=2 \
     data.max_length=4096 \
+    model.model_path=$MODEL_NAME \
     trainer.project_name=system-sft-qwen2.5-coder-7b \
     trainer.experiment_name=system-sft-qwen2.5-coder-7b \
     trainer.total_epochs=10 \
