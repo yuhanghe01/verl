@@ -3,14 +3,13 @@ FSDP wrapper for SFT workers
 """
 import logging
 import os
+import functools
 from contextlib import nullcontext
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.distributed.device_mesh import init_device_mesh
 from tensordict import TensorDict
-from peft import TaskType, get_peft_model, LoraConfig
-from verl.models.transformers.monkey_patch import apply_monkey_patch
 from verl.single_controller.base import Worker
 from verl.utils.dataset import SFTDataset
 from verl.utils.dataset.multiturn_sft_dataset import MultiTurnSFTDataset
@@ -21,9 +20,9 @@ from verl.utils.debug import log_gpu_memory_usage
 from verl.utils.flops_counter import FlopsCounter
 from verl.utils.fs import copy_to_local
 from verl.utils.torch_functional import get_cosine_schedule_with_warmup, get_wsd_schedule_with_warmup
-from verl.utils.py_functional import convert_to_regular_types
 from torchdata.stateful_dataloader import StatefulDataLoader
 from torch.utils.data import RandomSampler, SequentialSampler
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
 from verl.utils.fsdp_utils import (
     CPUOffloadPolicy,
@@ -37,7 +36,6 @@ from verl.utils.fsdp_utils import (
     offload_fsdp_model_to_cpu,
     offload_fsdp_optimizer,
 )
-from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 from verl.utils.device import get_device_name, get_torch_device, is_cuda_available
 from torch import optim
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
@@ -54,33 +52,20 @@ from verl.utils.tracking import Tracking
 
 from ray.train.torch import prepare_model, prepare_data_loader
 from torch.utils.data import Dataset, DataLoader
+from torch.nn import Module
+from typing import Set, Type
 
 logger = logging.getLogger(__file__)
 
 device_name = get_device_name()
 
-class FakeSFTDataset(Dataset):
-    def __init__(self, tokenizer, num_samples=128, max_len=256):
-        self.tokenizer = tokenizer
-        self.samples = [
-            "User: Hello Qwen, what's the weather today?\nAssistant: It's sunny with a high of 25°C."
-            for _ in range(num_samples)
-        ]
-        self.max_len = max_len
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        encoded = self.tokenizer(
-            self.samples[idx],
-            truncation=True,
-            max_length=self.max_len,
-            return_tensors="pt"
-        )
-        input_ids = encoded["input_ids"].squeeze(0)
-        labels = input_ids.clone()
-        return input_ids, labels
+def extract_transformer_block_classes(model: torch.nn.Module):
+    class_counter = {}
+    for _, module in model.named_modules():
+        cls = type(module)
+        class_counter[cls] = class_counter.get(cls, 0) + 1
+        
+    return {cls for cls, count in class_counter.items() if count > 1}
 
 from torch.nn.utils.rnn import pad_sequence
 def collate_fn(batch):
@@ -88,7 +73,6 @@ def collate_fn(batch):
     input_ids = pad_sequence(input_ids, batch_first=True)
     labels = pad_sequence(labels, batch_first=True, padding_value=-100)
     return input_ids, labels
-
 
 def create_device_mesh(world_size, fsdp_size):
     if fsdp_size < 0 or fsdp_size >= world_size:
@@ -225,9 +209,6 @@ class SFTLMWorker:
         local_model_path = copy_to_local(model_path)
         log_gpu_memory_usage("before model allocation", logger=logger)
 
-        # self.processor = hf_processor(local_model_path, 
-        #                               trust_remote_code=trust_remote_code)
-
         torch_dtype = self.config.model.fsdp_config.get('model_dtype', 'fp32')
         torch_dtype = PrecisionType.to_dtype(torch_dtype)
 
@@ -257,12 +238,53 @@ class SFTLMWorker:
             weight_decay=self.config.optim.get("weight_decay", 1e-2),
         )
         
+        transformer_auto_wrapper_policy = functools.partial(
+            transformer_auto_wrap_policy,
+            module = model,
+            transformer_layer_cls=extract_transformer_block_classes(model),
+        )
+
+        # model = FSDP(
+        #     model,
+        #     # device_id=self.device,
+        #     cpu_offload=CPUOffload(offload_params=True),
+        #     sharding_strategy=ShardingStrategy.FULL_SHARD,
+        #     mixed_precision=mp_policy,
+        # )
+        
+        # model = FSDP(
+        #     model,
+        #     device_id=self.device,
+        #     cpu_offload=CPUOffload(offload_params=False),
+        #     auto_wrap_policy=transformer_auto_wrapper_policy,
+        #     sharding_strategy=ShardingStrategy.FULL_SHARD,
+        #     mixed_precision=mp_policy,
+        #     sync_module_states=True,
+        #     forward_prefetch=True,
+        #     limit_all_gathers=True,
+        #     use_orig_params=False,
+        # )
+        
+        
+        
+        # auto_wrap_policy = transformer_auto_wrap_policy(module_classes=block_classes)
+
+        # Wrap model with FSDP
+        
+        transformer_auto_wrapper_policy = functools.partial(
+            transformer_auto_wrap_policy,
+            module = model,
+            transformer_layer_cls=extract_transformer_block_classes(model),
+        )
         model = FSDP(
             model,
-            # device_id=self.device,
+            # device_id=torch.cuda.current_device(),
             cpu_offload=CPUOffload(offload_params=True),
             sharding_strategy=ShardingStrategy.FULL_SHARD,
-            mixed_precision=mp_policy,
+            auto_wrap_policy=transformer_auto_wrapper_policy,
+            mixed_precision=MixedPrecision(param_dtype=torch.float16, 
+                                           reduce_dtype=torch.float16, 
+                                           buffer_dtype=torch.float16),
         )
 
         if self.config.optim.lr_scheduler == 'cosine':
@@ -462,12 +484,12 @@ class SFTLMWorker:
                 batch = batch.to(device_name)
                 loss_val = self.training_step(batch)
                 self.global_steps += 1
-                if batch_id % 100 == 0:
+                if batch_id % 10 == 0:
                     log_info = {'train/epoch': epoch,
                                 'train/step': int(self.global_steps),
                                 'train/total_steps': self.total_training_steps,
                                 'train/loss': loss_val.item(),
-                                'train/lr': self.model_lr_scheduler.get_last_lr()[0]}
+                                'train/lr(x1000)': self.model_lr_scheduler.get_last_lr()[0]*1000}
                     track_logger.log(log_info, step=self.global_steps)
 
             if epoch % self.config.trainer.eval_every_n_epochs == 0 and epoch > 0 and self.config.trainer.run_evaluation:
