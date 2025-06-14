@@ -492,7 +492,7 @@ class SFTLMWorker:
                                 'train/lr(x1000)': self.model_lr_scheduler.get_last_lr()[0]*1000}
                     track_logger.log(log_info, step=self.global_steps)
 
-            if epoch % self.config.trainer.eval_every_n_epochs == 0 and epoch > 0 and self.config.trainer.run_evaluation:
+            if epoch % self.config.trainer.eval_every_n_epochs == 0 and epoch >= 0 and self.config.trainer.run_evaluation:
                 accu_rate = self.run_inference_gsm8k()
                 log_info = {'eval/epoch': epoch,
                             'eval/accu_rate': accu_rate}
