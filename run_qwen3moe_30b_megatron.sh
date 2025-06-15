@@ -6,7 +6,9 @@ mkdir $DIST_CKPT_OUT_PATH
 DIST_CKPT_IN_PATH=/mnt/blob-data-sigmasystem/yuhang/qwen3-30B-A3B
 
 python3 examples/data_preprocess/gsm8k.py --local_dir ~/data/gsm8k
-python scripts/converter_hf_to_mcore.py --hf_model_path $HF_MODEL_PATH --output_path $DIST_CKPT_PATH
+echo "convert hf to mcore"
+python scripts/converter_hf_to_mcore.py --hf_model_path $HF_MODEL_PATH --output_path $DIST_CKPT_OUT_PATH
+echo "finished hf to mcore conversion"
 
 # If you are using vllm<=0.6.3, you might need to set the following environment variable to avoid bugs:
 # export VLLM_ATTENTION_BACKEND=XFORMERS
