@@ -2,6 +2,7 @@ set -x
 HF_HOME=/mnt/blob-data-sigmasystem/yuhang
 HF_MODEL_PATH=Qwen/Qwen3-30B-A3B
 DIST_CKPT_OUT_PATH=/mnt/blob-data-sigmasystem-out/yuhang/qwen3-30B-A3B
+mkdir $DIST_CKPT_OUT_PATH
 DIST_CKPT_IN_PATH=/mnt/blob-data-sigmasystem/yuhang/qwen3-30B-A3B
 
 python3 examples/data_preprocess/gsm8k.py --local_dir ~/data/gsm8k
