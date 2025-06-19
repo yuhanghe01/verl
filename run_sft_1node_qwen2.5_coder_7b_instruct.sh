@@ -1,9 +1,9 @@
 MODEL_NAME=Qwen/Qwen2.5-Coder-7B-Instruct 
 python -c "import transformers; transformers.pipeline('text-generation', model='Qwen/Qwen2.5-Coder-7B-Instruct')"
 
-train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_train_data.parquet
-test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_test_data.parquet
-ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data_Qwen2.5-7B-Codeir-Instruct-Naive
+train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_parquet_0619/system_train_data.parquet
+test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/system_parquet_0619/system_test_data.parquet
+ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data/Qwen2.5-7B-Coder-Instruct-Naive
 
 python \
     -m verl.trainer.main_sft_torchtrainer \
@@ -15,8 +15,8 @@ python \
     data.max_length=4096 \
     optim.lr=5e-5 \
     model.model_path=$MODEL_NAME \
-    trainer.project_name=sft-coder-7b-instruct-0613 \
-    trainer.experiment_name=sft-coder-7b-instruct-0613 \
+    trainer.project_name=sft-coder-7b-instruct-0619 \
+    trainer.experiment_name=sft-coder-7b-instruct-0619 \
     trainer.total_epochs=5 \
     trainer.nnodes=1 \
     trainer.n_gpus_per_node=8 \
