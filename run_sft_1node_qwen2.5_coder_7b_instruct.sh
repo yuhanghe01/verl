@@ -13,7 +13,8 @@ python \
     data.response_key=answer \
     data.train_batch_size=3 \
     data.max_length=4096 \
-    optim.lr=5e-5 \
+    data.truncation=left \
+    optim.lr=1e-5 \
     model.model_path=$MODEL_NAME \
     trainer.project_name=sft-coder-7b-instruct-0619 \
     trainer.experiment_name=sft-coder-7b-instruct-0619 \
