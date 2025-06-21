@@ -12,7 +12,7 @@ python \
     data.prompt_key=prompt \
     data.response_key=answer \
     data.train_batch_size=1 \
-    data.max_length=8k \
+    data.max_length=8000 \
     data.truncation=left \
     optim.lr=1e-5 \
     model.model_path=$MODEL_NAME \
