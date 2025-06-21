@@ -3,7 +3,7 @@ python -c "import transformers; transformers.pipeline('text-generation', model='
 
 train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/kql_parquet_0619/kql_train_data.parquet
 test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/kql_parquet_0619/kql_test_data.parquet
-ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data/Qwen2.5-7B-Coder-Instruct-Naive-kql
+ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data/Qwen2.5-7B-Coder-Instruct-Naive-kql-8k
 
 python \
     -m verl.trainer.main_sft_torchtrainer \
@@ -11,13 +11,13 @@ python \
     data.val_files=$test_file \
     data.prompt_key=prompt \
     data.response_key=answer \
-    data.train_batch_size=3 \
-    data.max_length=4096 \
+    data.train_batch_size=1 \
+    data.max_length=8k \
     data.truncation=left \
     optim.lr=1e-5 \
     model.model_path=$MODEL_NAME \
-    trainer.project_name=kql-coder-7b-instruct-0619 \
-    trainer.experiment_name=kql-coder-7b-instruct-0619 \
+    trainer.project_name=kql-coder-7b-instruct-0620 \
+    trainer.experiment_name=kql-coder-7b-instruct-0620 \
     trainer.total_epochs=5 \
     trainer.nnodes=1 \
     trainer.n_gpus_per_node=8 \
