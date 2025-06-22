@@ -674,11 +674,12 @@ def default_tp_concat_fn(layer_name_mapping, name, train_params, infer_params, m
     """
     from megatron.core import mpu
 
-    print('******************')
-    print(layer_name_mapping)
-    print('type: {}'.format(type(layer_name_mapping)))
-    print('******************')
-    if layer_name_mapping.get("qkv_layer_name") in name and "layer_norm" not in name:
+    #print('******************')
+    #print(layer_name_mapping)
+    #print('type: {}'.format(type(layer_name_mapping)))
+    #print('******************')
+    #if layer_name_mapping.get("qkv_layer_name") in name and "layer_norm" not in name:
+    if layer_name_mapping["qkv_layer_name"] in name and "layer_norm" not in name:
         # if the tensor is qkv, for each param on tp, split into q, k, v
         # concat q, k, v separately.
         q_lst = []
