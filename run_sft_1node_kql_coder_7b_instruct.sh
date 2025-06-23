@@ -11,7 +11,7 @@ python \
     data.val_files=$test_file \
     data.prompt_key=prompt \
     data.response_key=answer \
-    data.train_batch_size=2 \
+    data.train_batch_size=1 \
     data.max_length=8000 \
     data.truncation=right \
     optim.lr=1e-5 \
