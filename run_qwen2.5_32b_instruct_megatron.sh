@@ -7,7 +7,7 @@ DIST_CKPT_IN_PATH=/mnt/blob-data-sigmasystem/yuhang/qwen2.5-32B-instruct-megatro
 
 python3 examples/data_preprocess/gsm8k.py --local_dir ~/data/gsm8k
 echo "convert hf to mcore"
-python scripts/converter_hf_to_mcore.py --hf_model_path $HF_MODEL_PATH --output_path $DIST_CKPT_OUT_PATH
+#python scripts/converter_hf_to_mcore.py --hf_model_path $HF_MODEL_PATH --output_path $DIST_CKPT_OUT_PATH
 echo "finished hf to mcore conversion"
 
 # If you are using vllm<=0.6.3, you might need to set the following environment variable to avoid bugs:
@@ -55,7 +55,7 @@ python3 -m verl.trainer.main_ppo --config-path=config \
     trainer.project_name='verl_grpo_example_gsm8k_math' \
     trainer.experiment_name='qwen2.5_32b_instruct_megatron' \
     trainer.n_gpus_per_node=8 \
-    trainer.nnodes=2 \
+    trainer.nnodes=4 \
     trainer.save_freq=20 \
     trainer.test_freq=5 \
     trainer.total_epochs=15 $@
