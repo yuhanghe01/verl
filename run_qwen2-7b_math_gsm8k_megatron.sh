@@ -23,7 +23,7 @@ python3 -m verl.trainer.main_ppo --config-path=./config --config-name='ppo_megat
     data.max_response_length=512 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
-    actor_rollout_ref.model.path=Qwen/Qwen2-7B-Instruct \
+    actor_rollout_ref.model.path=Qwen/Qwen2.5-7B-Instruct \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.ppo_mini_batch_size=256 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
@@ -37,7 +37,7 @@ python3 -m verl.trainer.main_ppo --config-path=./config --config-name='ppo_megat
     actor_rollout_ref.ref.megatron.pipeline_model_parallel_size=2 \
     actor_rollout_ref.ref.megatron.tensor_model_parallel_size=2 \
     critic.optim.lr=1e-5 \
-    critic.model.path=Qwen/Qwen2-7B-Instruct \
+    critic.model.path=Qwen/Qwen2.5-7B-Instruct \
     critic.model.enable_gradient_checkpointing=False \
     critic.ppo_micro_batch_size_per_gpu=4 \
     algorithm.use_kl_in_reward=False \
