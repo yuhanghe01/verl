@@ -679,6 +679,9 @@ def default_tp_concat_fn(layer_name_mapping, name, train_params, infer_params, m
     #print('type: {}'.format(type(layer_name_mapping)))
     #print('******************')
     #if layer_name_mapping.get("qkv_layer_name") in name and "layer_norm" not in name:
+    if type(layer_name_mapping) == str:
+        import ast
+        layer_name_mapping = ast.literal_eval( layer_name_mapping )
     if layer_name_mapping["qkv_layer_name"] in name and "layer_norm" not in name:
         # if the tensor is qkv, for each param on tp, split into q, k, v
         # concat q, k, v separately.
