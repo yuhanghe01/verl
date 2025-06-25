@@ -71,13 +71,13 @@ actor_rollout_ref:
       param_offload: False
       grad_offload: False
       optimizer_offload: False
-      tensor_model_parallel_size: 1
-      expert_model_parallel_size: 1
+      tensor_model_parallel_size: null
+      expert_model_parallel_size: null
       expert_tensor_parallel_size: null
-      pipeline_model_parallel_size: 1
+      pipeline_model_parallel_size: null
       virtual_pipeline_model_parallel_size: null # change VPP interface for parallelism tests
       context_parallel_size: 1
-      sequence_parallel: True
+      sequence_parallel: False
       use_distributed_optimizer: True
       use_dist_checkpointing: False
       dist_checkpointing_path: null
@@ -97,10 +97,10 @@ actor_rollout_ref:
     use_torch_compile: ${actor_rollout_ref.actor.use_torch_compile}
     megatron:
       param_offload: False
-      tensor_model_parallel_size: 1
-      expert_model_parallel_size: 1
+      tensor_model_parallel_size: null
+      expert_model_parallel_size: null
       expert_tensor_parallel_size: None
-      pipeline_model_parallel_size: 1
+      pipeline_model_parallel_size: null
       virtual_pipeline_model_parallel_size: null # change VPP interface for parallelism tests
       context_parallel_size: 1
       sequence_parallel: True
@@ -195,10 +195,10 @@ critic:
     param_offload: False
     grad_offload: False
     optimizer_offload: False
-    tensor_model_parallel_size: 1
-    expert_model_parallel_size: 1
+    tensor_model_parallel_size: null
+    expert_model_parallel_size: null
     expert_tensor_parallel_size: null
-    pipeline_model_parallel_size: 1
+    pipeline_model_parallel_size: null
     virtual_pipeline_model_parallel_size: null # change VPP interface for parallelism tests
     context_parallel_size: 1
     sequence_parallel: True
@@ -228,10 +228,10 @@ reward_model:
   strategy: megatron
   megatron:
     param_offload: False
-    tensor_model_parallel_size: 1
-    expert_model_parallel_size: 1
+    tensor_model_parallel_size: null
+    expert_model_parallel_size: null
     expert_tensor_parallel_size: null
-    pipeline_model_parallel_size: 1
+    pipeline_model_parallel_size: null
     virtual_pipeline_model_parallel_size: null # change VPP interface for parallelism tests
     context_parallel_size: 1
     sequence_parallel: True
