@@ -17,4 +17,4 @@ test_files="['$gsm8k_test_path']"
 mcore_save_path=/mnt/blob-data-sigmasystem-out/yuhang/mcore-Qwen-Qwen3-30B-A3
 mkdir -p $mcore_save_path
 
-python scripts/converter_hf_to_mcore.py --hf_model_path=/mnt/blob-data-sigmasystem/yuhang/hub/models--Qwen--Qwen3-30B-A3B/snapshots/ae659febe817e4b3ebd7355f47792725801204c9 output_path=$mcore_save_path
+python scripts/converter_hf_to_mcore.py --hf_model_path=/mnt/blob-data-sigmasystem/yuhang/hub/models--Qwen--Qwen3-30B-A3B/snapshots/ae659febe817e4b3ebd7355f47792725801204c9 --output_path=$mcore_save_path
