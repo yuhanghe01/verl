@@ -1,18 +1,18 @@
 set -x
 HF_HOME=/mnt/blob-data-sigmasystem/yuhang
 HF_MODEL_PATH=Qwen/Qwen3-30B-A3B
-DIST_CKPT_OUT_PATH=/mnt/blob-data-sigmasystem-out/yuhang/qwen3-30B-A3B
-mkdir $DIST_CKPT_OUT_PATH
-DIST_CKPT_IN_PATH=/mnt/blob-data-sigmasystem/yuhang/qwen3-30B-A3B
+#DIST_CKPT_OUT_PATH=/mnt/blob-data-sigmasystem-out/yuhang/qwen3-30B-A3B
+#mkdir $DIST_CKPT_OUT_PATH
+DIST_CKPT_IN_PATH=/mnt/blob-data-sigmasystem/yuhang/mcore-Qwen-Qwen3-30B-A3
 
 python3 examples/data_preprocess/gsm8k.py --local_dir ~/data/gsm8k
-echo "convert hf to mcore"
-python scripts/converter_hf_to_mcore.py --hf_model_path $HF_MODEL_PATH --output_path $DIST_CKPT_OUT_PATH
-echo "finished hf to mcore conversion"
+#echo "convert hf to mcore"
+#python scripts/converter_hf_to_mcore.py --hf_model_path $HF_MODEL_PATH --output_path $DIST_CKPT_OUT_PATH
+#echo "finished hf to mcore conversion"
 
 # If you are using vllm<=0.6.3, you might need to set the following environment variable to avoid bugs:
 # export VLLM_ATTENTION_BACKEND=XFORMERS
-export CUDA_DEVICE_MAX_CONNECTIONS=1 # For megatron communication/computation overlapping
+export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 python3 -m verl.trainer.main_ppo --config-path=config \
     --config-name='ppo_megatron_trainer.yaml'\
