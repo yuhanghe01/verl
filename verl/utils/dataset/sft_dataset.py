@@ -36,7 +36,6 @@ class SFTDataset(Dataset):
     Arguments:
         config (OmegaConf): the data config
     """
-
     def __init__(self, parquet_files: Union[str, List[str]], tokenizer, config):
         prompt_key = config.get("prompt_key", "prompt")
         prompt_dict_keys = config.get("prompt_dict_keys", None)
@@ -70,13 +69,6 @@ class SFTDataset(Dataset):
         for i, parquet_file in enumerate(self.parquet_files):
             self.parquet_files[i] = copy_to_local(parquet_file, verbose=True)
 
-    # def series_to_item(self, ls):
-    #     import numpy
-    #     import pandas
-    #     while isinstance(ls, (pandas.core.series.Series, numpy.ndarray)) and len(ls) == 1:
-    #         ls = ls[0]
-    #     return ls
-
     def _read_files_and_tokenize(self):
         def series_to_item(ls):
             import numpy
@@ -92,37 +84,41 @@ class SFTDataset(Dataset):
             dataframe = pd.read_parquet(parquet_file)
             dataframes.append(dataframe)
         self.dataframe = pd.concat(dataframes)
+        
+        # breakpoint()
+        
         self.prompts = self.dataframe[self.prompt_key[0]]
-        for key in self.prompt_dict_keys:
-            # type(x): pandas.core.series.Series
-            # type(x[0]): numpy.ndarray
-            # type(x[0][0]): dict
-            # breakpoint()
-            try:
-                # self.prompts = self.prompts.apply(lambda x:series_to_item(x)[key], axis=1)  # noqa: B023
-                self.prompts = self.prompts.apply(lambda x:series_to_item(x)[key])  # noqa: B023
-                # self.prompts = self.prompts.apply(lambda x: series_to_item(x)[key], axis = 1)
-                # new_prompts = []
-                # for x in self.prompts:
-                #     item = series_to_item(x)
-                #     value = item[key]
-                #     new_prompts.append(value)
-                # self.prompts = pd.Series(new_prompts)
-            except Exception:
-                print(f"self.prompts={self.prompts}")
-                raise
-        self.prompts = self.prompts.tolist()
         self.responses = self.dataframe[self.response_key[0]]
+        # for key in self.prompt_dict_keys:
+        #     # type(x): pandas.core.series.Series
+        #     # type(x[0]): numpy.ndarray
+        #     # type(x[0][0]): dict
+        #     # breakpoint()
+        #     try:
+        #         # self.prompts = self.prompts.apply(lambda x:series_to_item(x)[key], axis=1)  # noqa: B023
+        #         self.prompts = self.prompts.apply(lambda x:series_to_item(x)[key])  # noqa: B023
+        #         # self.prompts = self.prompts.apply(lambda x: series_to_item(x)[key], axis = 1)
+        #         # new_prompts = []
+        #         # for x in self.prompts:
+        #         #     item = series_to_item(x)
+        #         #     value = item[key]
+        #         #     new_prompts.append(value)
+        #         # self.prompts = pd.Series(new_prompts)
+        #     except Exception:
+        #         print(f"self.prompts={self.prompts}")
+        #         raise
+        # self.prompts = self.prompts.tolist()
+        # self.responses = self.dataframe[self.response_key[0]]
         for key in self.response_dict_keys:
             try:
                 #self.responses = self.responses.apply(lambda x: self.series_to_item(x)[key], axis=1)  # noqa: B023
-                #self.responses = self.responses.apply(lambda x: self.series_to_item(x)[key])  # noqa: B023
-                new_responses = []
-                for x in self.responses:
-                    item = series_to_item(x)
-                    value = item[key]
-                    new_responses.append(value)
-                self.responses = pd.Series(new_responses)
+                self.responses = self.responses.apply(lambda x: series_to_item(x)[key])  # noqa: B023
+                # new_responses = []
+                # for x in self.responses:
+                #     item = series_to_item(x)
+                #     value = item[key]
+                #     new_responses.append(value)
+                # self.responses = pd.Series(new_responses)
             except Exception:
                 print(f"self.responses={self.responses}")
                 raise
@@ -133,16 +129,22 @@ class SFTDataset(Dataset):
 
     def __getitem__(self, item):
         tokenizer = self.tokenizer
-
         prompt = self.prompts[item]
         response = self.responses[item]
-
         # apply chat template
         prompt_chat = [{"role": "user", "content": prompt}]
 
         # string
-        prompt_chat_str = tokenizer.apply_chat_template(prompt_chat, add_generation_prompt=True, tokenize=False)
+        prompt_chat_str = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, tokenize=False)
         response_chat_str = response + tokenizer.eos_token
+        
+        # print('*******************')
+        # print('prompt_chat: {}'.format( prompt ))
+        # print('promot_chat_str: {}'.format(prompt_chat_str))
+        # print('response_chat: {}'.format( response_chat_str ))
+        # print('*******************')
+        
+        # exit(0)
 
         # tokenize
         prompt_ids_output = tokenizer(prompt_chat_str, return_tensors="pt", add_special_tokens=False)
@@ -195,3 +197,35 @@ class SFTDataset(Dataset):
             "position_ids": position_ids,
             "loss_mask": loss_mask,
         }
+        
+
+def test():
+    from verl.utils import hf_processor, hf_tokenizer
+    import yaml
+    config_filename = 'verl/trainer/config/sft_trainer.yaml'
+    
+    with open(config_filename, 'r') as f:
+        config = yaml.safe_load(f)
+        
+    model_path = 'Qwen/Qwen2.5-Coder-7B-Instruct'
+    tokenizer = hf_tokenizer(model_path)
+    
+    sft_data = SFTDataset(
+        parquet_files='/mnt/yuhang/SFT/fcshell_parquet_0625/fcshell_train_data.parquet',
+        tokenizer=tokenizer,
+        config=config
+    )
+    
+    data_loader = torch.utils.data.DataLoader(
+        sft_data,
+        batch_size=2,)
+    
+    for batch in data_loader:
+        print(batch['input_ids'].shape)
+        print(batch['attention_mask'].shape)
+        print(batch['position_ids'].shape)
+        print(batch['loss_mask'].shape)
+        breakpoint()
+    
+    
+# test()
