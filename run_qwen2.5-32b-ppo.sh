@@ -1,20 +1,17 @@
 set -x
 python examples/data_preprocess/gsm8k.py
-gsm8k_train_path=$HOME/data/gsm8k/train.parquet
-gsm8k_test_path=$HOME/data/gsm8k/test.parquet
-
-train_files="['$gsm8k_train_path', '$math_train_path']"
-test_files="['$gsm8k_test_path', '$math_test_path']"
+gsm8k_train_file=$HOME/data/gsm8k/train.parquet
+gsm8k_test_file=$HOME/data/gsm8k/test.parquet
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=gae \
-    data.train_files="$train_files" \
-    data.val_files="$test_files" \
+    data.train_files=$gsm8k_train_file \
+    data.val_files=$gsm8k_test_file \
     data.train_batch_size=1024 \
     data.max_prompt_length=1024 \
     data.max_response_length=1024 \
     data.filter_overlong_prompts=True \
-    data.truncation='error' \
+    data.truncation='right' \
     actor_rollout_ref.model.path=Qwen/Qwen2.5-32B-Instruct \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.actor.optim.lr=1e-6 \
