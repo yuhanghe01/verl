@@ -40,9 +40,9 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console'] \
     trainer.project_name='verl_example' \
-    trainer.experiment_name='Qwen2.5-32B-Instruct_function_rm' \
+    trainer.experiment_name='Qwen2.5-32B-Instruct_function' \
     trainer.n_gpus_per_node=8 \
-    trainer.nnodes=4 \
+    trainer.nnodes=2 \
     trainer.save_freq=20 \
     trainer.test_freq=10 \
     trainer.total_epochs=15 $@
