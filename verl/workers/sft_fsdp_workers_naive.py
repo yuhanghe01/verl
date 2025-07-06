@@ -419,20 +419,22 @@ class SFTLMWorker:
         input_ids = batch["input_ids"].to(device_name)
         attention_mask = batch["attention_mask"].to(device_name)
         position_ids = batch["position_ids"].to(device_name)
-        loss_mask = batch.pop("loss_mask")[:, :-1].reshape(-1).to(device_name)
-        loss_fct = nn.CrossEntropyLoss(reduction="none")
-        
-        labels = input_ids[:, 1:].contiguous()
+        # loss_mask = batch.pop("loss_mask")[:, :-1].reshape(-1).to(device_name)
+        loss_fct = nn.CrossEntropyLoss(reduction="mean", ignore_index=-100)
+
+        # labels = input_ids[:, 1:].contiguous()
         output = self.fsdp_model(input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids, use_cache=False)
         logits = output.logits
         shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = labels.contiguous()
         shift_logits = shift_logits.view(-1, self.vocab_size)
+        
+        shift_labels = batch["labels"][:, 1:].contiguous()
         shift_labels = shift_labels.view(-1)
         shift_labels = shift_labels.to(shift_logits.device)
+        
         loss = loss_fct(shift_logits, shift_labels)
-        loss = loss * loss_mask.to(loss.device)
-        loss = torch.sum(loss) / (loss_mask.sum() + 1e-8)
+        # loss = loss * loss_mask.to(loss.device)
+        # loss = torch.sum(loss) / (loss_mask.sum() + 1e-8)
         if do_backward:
             loss.backward()
 
@@ -492,13 +494,14 @@ class SFTLMWorker:
                                 'train/lr(x1000)': self.model_lr_scheduler.get_last_lr()[0]*1000}
                     track_logger.log(log_info, step=self.global_steps)
 
-            if epoch % self.config.trainer.eval_every_n_epochs == 0 and epoch >= 0 and self.config.trainer.run_evaluation:
+            if epoch % self.config.trainer.eval_every_n_epochs == 0 and self.config.trainer.run_evaluation:
                 accu_rate = self.run_inference_gsm8k()
                 log_info = {'eval/epoch': epoch,
                             'eval/accu_rate': accu_rate}
                 track_logger.log(log_info, step=self.global_steps)
             
-            if epoch % self.config.trainer.save_every_n_epochs == 0 and epoch > 0:
+            if epoch % self.config.trainer.save_every_n_epochs == 0 and epoch >= 0:
+                print('save model for step:', self.global_steps)
                 self.save_checkpoint()
                 
             self.model_lr_scheduler.step()
