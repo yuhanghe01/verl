@@ -16,7 +16,7 @@ python3 -c "import transformers; transformers.pipeline('text-generation', model=
 #export TORCHDYNAMO_DISABLE=1
 
 python -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=gae \
+    algorithm.adv_estimator=ppo \
     data.train_files="$train_files" \
     data.val_files="$test_files" \
     data.train_batch_size=1024 \
