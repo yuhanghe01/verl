@@ -1,17 +1,23 @@
 set -x
 python examples/data_preprocess/gsm8k.py
-gsm8k_train_file=$HOME/data/gsm8k/train.parquet
-gsm8k_test_file=$HOME/data/gsm8k/test.parquet
+#gsm8k_train_file=$HOME/data/gsm8k/train.parquet
+#gsm8k_test_file=$HOME/data/gsm8k/test.parquet
 
-python3 -m verl.trainer.main_ppo \
+gsm8k_train_path=$HOME/data/gsm8k/train.parquet
+gsm8k_test_path=$HOME/data/gsm8k/test.parquet
+
+train_files="['$gsm8k_train_path']"
+test_files="['$gsm8k_test_path']"
+
+python -m verl.trainer.main_ppo \
     algorithm.adv_estimator=gae \
-    data.train_files=$gsm8k_train_file \
-    data.val_files=$gsm8k_test_file \
+    data.train_files="$train_files" \
+    data.val_files="$test_files" \
     data.train_batch_size=1024 \
     data.max_prompt_length=1024 \
     data.max_response_length=1024 \
     data.filter_overlong_prompts=True \
-    data.truncation='right' \
+    data.truncation='error' \
     actor_rollout_ref.model.path=Qwen/Qwen2.5-32B-Instruct \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.actor.optim.lr=1e-6 \
@@ -35,11 +41,11 @@ python3 -m verl.trainer.main_ppo \
     critic.model.fsdp_config.optimizer_offload=False \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \
-    trainer.logger=['console'] \
+    trainer.logger=['console','wandb'] \
     trainer.project_name='verl_example' \
-    trainer.experiment_name='Qwen2.5-32B-Instruct_function' \
+    trainer.experiment_name='Qwen2.5-32B-Instruct_function_rm' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=2 \
     trainer.save_freq=20 \
     trainer.test_freq=10 \
-    trainer.total_epochs=15 $@
+    trainer.total_epochs=15
