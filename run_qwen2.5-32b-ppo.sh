@@ -1,5 +1,6 @@
 set -x
-python examples/data_preprocess/gsm8k.py
+
+python examples/data_preprocess/gsm8k.py --local_dir ~/data/gsm8k
 #gsm8k_train_file=$HOME/data/gsm8k/train.parquet
 #gsm8k_test_file=$HOME/data/gsm8k/test.parquet
 
