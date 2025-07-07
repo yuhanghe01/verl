@@ -11,8 +11,9 @@ train_files="['$gsm8k_train_path']"
 test_files="['$gsm8k_test_path']"
 
 
+python3 -c "import transformers; transformers.pipeline('text-generation', model='Qwen/Qwen2.5-0.5B-Instruct')"
 
-export TORCHDYNAMO_DISABLE=1
+#export TORCHDYNAMO_DISABLE=1
 
 python -m verl.trainer.main_ppo \
     algorithm.adv_estimator=gae \
@@ -23,7 +24,7 @@ python -m verl.trainer.main_ppo \
     data.max_response_length=1024 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-32B-Instruct \
+    actor_rollout_ref.model.path=Qwen/Qwen2.5-0.5B-Instruct \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -40,7 +41,7 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     critic.optim.lr=1e-5 \
     critic.model.use_remove_padding=True \
-    critic.model.path=Qwen/Qwen2.5-32B-Instruct \
+    critic.model.path=Qwen/Qwen2.5-0.5B-Instruct \
     critic.model.enable_gradient_checkpointing=False \
     critic.ppo_micro_batch_size_per_gpu=8 \
     critic.model.fsdp_config.param_offload=False \
