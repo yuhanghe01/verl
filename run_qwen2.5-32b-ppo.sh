@@ -10,6 +10,10 @@ gsm8k_test_path=$HOME/data/gsm8k/test.parquet
 train_files="['$gsm8k_train_path']"
 test_files="['$gsm8k_test_path']"
 
+
+
+export TORCHDYNAMO_DISABLE=1
+
 python -m verl.trainer.main_ppo \
     algorithm.adv_estimator=gae \
     data.train_files="$train_files" \
