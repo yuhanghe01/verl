@@ -1,9 +1,9 @@
 MODEL_NAME=Qwen/Qwen2.5-Coder-7B-Instruct 
 python -c "import transformers; transformers.pipeline('text-generation', model='Qwen/Qwen2.5-Coder-7B-Instruct')"
 
-train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/fcshell_parquet_0626/fcshell_train_data.parquet
-test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/fcshell_parquet_0626/fcshell_test_data.parquet
-ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data/Qwen2.5-7B-Coder-Instruct-Naive-fcshell-0705
+train_file=/mnt/blob-data-sigmasystem/yuhang/system_data/fcshell_parquet_0806/fcshell_train_data.parquet
+test_file=/mnt/blob-data-sigmasystem/yuhang/system_data/fcshell_parquet_0806/fcshell_test_data.parquet
+ckpt_dir=/mnt/blob-data-sigmasystem-out/yuhang/system_data/Qwen2.5-7B-Coder-Instruct-Naive-fcshell-0806
 
 python \
     -m verl.trainer.main_sft_torchtrainer \
@@ -16,9 +16,9 @@ python \
     data.truncation=right \
     optim.lr=1e-5 \
     model.model_path=$MODEL_NAME \
-    trainer.project_name=fcshell-coder-7b-instruct-0705-ltp \
-    trainer.experiment_name=fcshell-coder-7b-instruct-0705-ltp \
-    trainer.total_epochs=50 \
+    trainer.project_name=fcshell-coder-7b-instruct-0806-ltp \
+    trainer.experiment_name=fcshell-coder-7b-instruct-0806-ltp \
+    trainer.total_epochs=10 \
     trainer.nnodes=1 \
     trainer.n_gpus_per_node=8 \
     trainer.logger=['wandb','console'] \
