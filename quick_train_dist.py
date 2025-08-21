@@ -28,7 +28,7 @@ def get_model_tokenizer(model_path, device):
         torch_dtype="auto",
         trust_remote_code=True
     )
-    model.to(device)
+    #model.to(device)
     return model, tokenizer
 
 def get_dataloader(data_path, data_config, tokenizer, batch_size, local_rank, world_size):
