@@ -16,7 +16,7 @@ def get_dataloader(data_path, data_config, tokenizer):
     
     train_dataloader = StatefulDataLoader(
         dataset=dataset,
-        batch_size=6,
+        batch_size=3,
         num_workers=4,
         drop_last=True,
         collate_fn=None,
