@@ -16,7 +16,7 @@ def get_dataloader(data_path, data_config, tokenizer):
     
     train_dataloader = StatefulDataLoader(
         dataset=dataset,
-        batch_size=2,
+        batch_size=8,
         num_workers=12,
         drop_last=True,
         collate_fn=None,
@@ -60,9 +60,9 @@ def train():
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     
-    num_epochs = 5
+    num_epochs = 10
     vocab_size = model.config.vocab_size #152064
-    ckpt_save_path = '/mnt/blob-data-sigmasystem-out/yuhang/system_data/Qwen2.5-32B-Coder-Instruct-Naive-FCShell-0824'
+    ckpt_save_path = '/mnt/blob-data-sigmasystem-out/yuhang/system_data/FCShell_Qwen_32B_ckpt'
     os.makedirs(ckpt_save_path, exist_ok=True)
     
     for epoch in range(num_epochs):
