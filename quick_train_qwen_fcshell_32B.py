@@ -16,8 +16,8 @@ def get_dataloader(data_path, data_config, tokenizer):
     
     train_dataloader = StatefulDataLoader(
         dataset=dataset,
-        batch_size=3,
-        num_workers=4,
+        batch_size=2,
+        num_workers=12,
         drop_last=True,
         collate_fn=None,
         shuffle=True,
@@ -48,7 +48,7 @@ def train():
     model, tokenizer = get_model_tokenizer()
     
     # Load the dataset
-    config_filename = 'sft_trainer.yaml'
+    config_filename = 'sft_trainer_fcshell.yaml'
     with open(config_filename, 'r') as f:
         config = yaml.safe_load(f)
     
