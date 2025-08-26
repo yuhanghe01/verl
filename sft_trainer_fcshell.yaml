@@ -12,7 +12,7 @@ data:
   multiturn:
     enable: false  # Set to true to use multi-turn dataset
     messages_key: messages  # Key for messages list in multi-turn mode
-  max_length: 300 # Maximum sequence length for input, for kql: 8192, for fcshell: 300
+  max_length: 600 # Maximum sequence length for input, for kql: 8192, for fcshell: 300
   truncation: right
   balance_dp_token: false
   chat_template: null
