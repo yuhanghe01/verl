@@ -55,15 +55,25 @@ def train():
     data_config = config['data']
     
     # data_path = ['/mnt/yuhang/SFT/kql_parquet_0626/kql_train_data.parquet']
-    data_path = ['/mnt/blob-data-sigmasystem/yuhang/system_data/fcshell_parquet_0825/fcshell_train_data.parquet']
+    data_path = ['/mnt/blob-data-sigmasystem/yuhang/system_data/fcshell_parquet_0831/fcshell_train_data.parquet']
     train_dataloader = get_dataloader(data_path, tokenizer, data_config)
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     
-    num_epochs = 10
+    num_epochs = 20
     vocab_size = model.config.vocab_size #152064
-    ckpt_save_path = '/mnt/blob-data-sigmasystem-out/yuhang/system_data/FCShell_Qwen_32B_ckpt_appsysprompt'
+    ckpt_save_path = '/mnt/blob-data-sigmasystem-out/yuhang/system_data/FCShell_Qwen32B_ckpt_appsysprompt_SFT_0831'
     os.makedirs(ckpt_save_path, exist_ok=True)
+    init_ckpt_save_path = '/mnt/blob-data-sigmasystem-out/yuhang/system_data/FCShell_Qwen32B_ckpt_appsysprompt_init_0831'
+    os.makedirs(init_ckpt_save_path, exist_ok=True)
+
+    # Save the model checkpoint
+    #save_path = os.path.join(init_ckpt_save_path, f"model_epoch_{epoch}")
+    model.save_pretrained(init_ckpt_save_path)
+    tokenizer.save_pretrained(init_ckpt_save_path)
+    print(f"Model saved to {init_ckpt_save_path}")
+
+
     
     for epoch in range(num_epochs):
         for iter_id, batch in enumerate(train_dataloader):
