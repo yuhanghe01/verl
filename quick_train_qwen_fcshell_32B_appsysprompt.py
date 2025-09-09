@@ -63,6 +63,7 @@ def train():
     num_epochs = 20
     vocab_size = model.config.vocab_size #152064
     ckpt_save_path = '/mnt/blob-data-sigmasystem-out/yuhang/system_data/FCShell_Qwen32B_ckpt_appsysprompt_SFT_0831_1e4'
+    print('create save folder')
     os.makedirs(ckpt_save_path, exist_ok=True)
     #init_ckpt_save_path = '/mnt/blob-data-sigmasystem-out/yuhang/system_data/FCShell_Qwen32B_ckpt_appsysprompt_init_0831'
     #os.makedirs(init_ckpt_save_path, exist_ok=True)
