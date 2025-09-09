@@ -113,6 +113,7 @@ def train():
     print('Done!')
 
 if __name__ == "__main__":
+    print('entered into the main function!')
     train()
     # model, tokenizer = get_model_tokenizer()
     # print(model)
