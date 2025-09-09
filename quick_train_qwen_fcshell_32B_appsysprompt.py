@@ -45,6 +45,7 @@ def get_model_tokenizer():
     return model, tokenizer
 
 def train():
+    print('get model and tokenizer ...')
     model, tokenizer = get_model_tokenizer()
     
     # Load the dataset
@@ -56,6 +57,7 @@ def train():
     
     # data_path = ['/mnt/yuhang/SFT/kql_parquet_0626/kql_train_data.parquet']
     data_path = ['/mnt/blob-data-sigmasystem/yuhang/system_data/fcshell_parquet_0831/fcshell_train_data.parquet']
+    print('construct train dataloader')
     train_dataloader = get_dataloader(data_path, tokenizer, data_config)
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
