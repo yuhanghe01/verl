@@ -2,7 +2,7 @@
 # Train TangoFlux with accelerate on GPUs 0 and 1
 
 # Select GPUs
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+#export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Launch training FT
 accelerate launch \
