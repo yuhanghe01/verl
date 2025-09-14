@@ -7,7 +7,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 # Launch training FT
 accelerate launch \
   --config_file="accelerator_config.yaml" \
-  train.py \
+  /opt/conda/envs/tango/lib/python3.10/site-packages/tangoflux/train.py \
   --checkpointing_steps=best \
   --save_every=1 \
   --config="tangoflux_config_ft.yaml" \
@@ -16,7 +16,7 @@ accelerate launch \
 
 accelerate launch \
   --config_file="accelerator_config.yaml" \
-  train.py \
+  /opt/conda/envs/tango/lib/python3.10/site-packages/tangoflux/train.py \
   --checkpointing_steps=best \
   --save_every=5 \
   --config="tangoflux_config_scratch.yaml"
