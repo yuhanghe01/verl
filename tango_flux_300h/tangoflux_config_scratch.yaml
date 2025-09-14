@@ -4,7 +4,7 @@ paths:
   val_file: "val.json"
   test_file: "test.json"
   resume_from_checkpoint: ""
-  output_dir: "/mnt/blob-data-sigmasystem-out/yuhang/Aurelius/tangoflux_300_scratch"
+  output_dir: "/mnt/blob-data-sigmasystem-out/yuhang/Aurelius/tangoflux_300_scratch_4gpu"
 
 # Training-related parameters
 training:
