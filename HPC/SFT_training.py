@@ -271,12 +271,31 @@ class SFTDataset(Dataset):
     def __len__(self) -> int:
         return len(self.records)
 
+    def _apply_template_ids(self, messages: List[Dict[str, str]],
+                            add_generation_prompt: bool) -> List[int]:
+        """Return a flat ``list[int]`` of token ids from the chat template.
+
+        Depending on the tokenizer / transformers version, ``apply_chat_template``
+        may return a plain list, a nested ``[[...]]`` list, or a ``BatchEncoding``
+        dict. Normalise all of these to a flat list of ints.
+        """
+        out = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=add_generation_prompt,
+            return_dict=False,
+        )
+        # BatchEncoding / dict -> take the input_ids field.
+        if isinstance(out, dict):
+            out = out["input_ids"]
+        # Batched output [[...]] -> unwrap the single example.
+        if len(out) > 0 and isinstance(out[0], (list, tuple)):
+            out = out[0]
+        return list(out)
+
     def _encode(self, messages: List[Dict[str, str]]) -> Tuple[List[int], List[int]]:
-        tok = self.tokenizer
-        prompt_ids = tok.apply_chat_template(
-            messages[:-1], tokenize=True, add_generation_prompt=True)
-        full_ids = tok.apply_chat_template(
-            messages, tokenize=True, add_generation_prompt=False)
+        prompt_ids = self._apply_template_ids(messages[:-1], add_generation_prompt=True)
+        full_ids = self._apply_template_ids(messages, add_generation_prompt=False)
         resp_ids = full_ids[len(prompt_ids):]
 
         max_len = self.max_seq_length
