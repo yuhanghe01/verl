@@ -27,7 +27,7 @@ CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"  # GPUs to expose
 MASTER_PORT="${MASTER_PORT:-29500}"
 
 # --- model (ModelArguments) -------------------------------------------------
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-14B-Instruct}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-3B-Instruct}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
 TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-True}"
 ATTN_IMPL="${ATTN_IMPL:-sdpa}"                   # sdpa | flash_attention_2 | eager
 USE_LORA="${USE_LORA:-0}"                         # 1 = LoRA (fits 32B); 0 = full FT
