@@ -69,6 +69,7 @@ import json
 import os
 import re
 import inspect
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
@@ -76,6 +77,11 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 import torch
 import torch.distributed as dist
 from torch.utils.data import Dataset
+
+try:
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+except Exception:  # pragma: no cover - FSDP unavailable on some builds
+    FSDP = None
 
 import transformers
 from transformers import (
@@ -367,9 +373,12 @@ def run_training(model, tokenizer, data_args: DataArguments,
     trainer = Trainer(**trainer_kwargs)
     if training_args.do_eval and eval_args is not None:
         # Evaluate (generation + metrics) at the end of every epoch.
-        trainer.add_callback(
-            PerEpochEvalCallback(tokenizer, data_args, eval_args, training_args.device)
-        )
+        eval_cb = PerEpochEvalCallback(
+            tokenizer, data_args, eval_args, training_args.device)
+        # Give the callback access to the trainer so it can use the FSDP-wrapped
+        # model (model_wrapped) for generation, where parameters can be gathered.
+        eval_cb.trainer = trainer
+        trainer.add_callback(eval_cb)
     trainer.train(resume_from_checkpoint=_detect_resume(training_args))
     trainer.save_model(training_args.output_dir)
     trainer.save_state()
@@ -423,15 +432,27 @@ def _generate_batch(model, tokenizer, prompts: List[str], device: torch.device,
     tokenizer.padding_side = "left"
     enc = tokenizer(prompts, return_tensors="pt", padding=True, truncation=False)
     enc = {k: v.to(device) for k, v in enc.items()}
-    base = model.module if hasattr(model, "module") else model
-    out = base.generate(
-        **enc,
-        max_new_tokens=max_new_tokens,
-        do_sample=False,
-        num_beams=1,
-        pad_token_id=tokenizer.pad_token_id,
-        use_cache=True,
-    )
+
+    # Under FSDP the parameters are sharded (the embedding weight is a 1-D flat
+    # shard), so calling generate() directly raises "'weight' must be 2-D".
+    # Gather the full parameters for the duration of generation.
+    use_fsdp = (FSDP is not None
+                and any(isinstance(m, FSDP) for m in model.modules()))
+    if use_fsdp:
+        gather_ctx = FSDP.summon_full_params(model, recurse=True, writeback=False)
+    else:
+        gather_ctx = contextlib.nullcontext()
+
+    with gather_ctx:
+        base = model.module if hasattr(model, "module") else model
+        out = base.generate(
+            **enc,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            num_beams=1,
+            pad_token_id=tokenizer.pad_token_id,
+            use_cache=True,
+        )
     gen = out[:, enc["input_ids"].shape[1]:]
     return tokenizer.batch_decode(gen, skip_special_tokens=True)
 
@@ -611,30 +632,36 @@ class PerEpochEvalCallback(TrainerCallback):
         self.data_args = data_args
         self.eval_args = eval_args
         self.device = device
+        self.trainer = None  # set by run_training; gives access to model_wrapped
 
     def on_epoch_end(self, args, state, control, model=None, **kwargs):
-        if model is None:
+        # Prefer the (possibly FSDP/DDP) wrapped model so parameters can be
+        # gathered during generation; fall back to the model passed in.
+        eval_model = model
+        if self.trainer is not None and getattr(self.trainer, "model_wrapped", None) is not None:
+            eval_model = self.trainer.model_wrapped
+        if eval_model is None:
             return control
         epoch = int(round(state.epoch)) if state.epoch else state.global_step
-        was_training = model.training
-        cfg = getattr(model, "config", None)
+        was_training = eval_model.training
+        cfg = getattr(eval_model, "config", None)
         prev_use_cache = getattr(cfg, "use_cache", None) if cfg is not None else None
-        gc_enabled = getattr(model, "is_gradient_checkpointing", False)
+        gc_enabled = getattr(eval_model, "is_gradient_checkpointing", False)
         try:
             if gc_enabled:
-                model.gradient_checkpointing_disable()
+                eval_model.gradient_checkpointing_disable()
             if cfg is not None:
                 cfg.use_cache = True
-            model.eval()
-            run_evaluation(model, self.tokenizer, self.data_args,
+            eval_model.eval()
+            run_evaluation(eval_model, self.tokenizer, self.data_args,
                            self.eval_args, args, self.device, tag=f"epoch{epoch}")
         finally:
             if cfg is not None and prev_use_cache is not None:
                 cfg.use_cache = prev_use_cache
             if gc_enabled:
-                model.gradient_checkpointing_enable()
+                eval_model.gradient_checkpointing_enable()
             if was_training:
-                model.train()
+                eval_model.train()
         return control
 
 
