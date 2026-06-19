@@ -68,6 +68,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import math
 import inspect
 import contextlib
 from dataclasses import dataclass, field
@@ -76,7 +77,8 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader, DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 try:
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -354,36 +356,163 @@ class DataCollatorForSFT:
 def run_training(model, tokenizer, data_args: DataArguments,
                  training_args: TrainingArguments,
                  eval_args: Optional[EvalArguments] = None) -> None:
+    """Explicit training loop (no HF ``Trainer``) so intermediate results such
+    as per-step loss / learning-rate / grad-norm can be printed directly."""
+    device = maybe_init_distributed()
     train_records = load_records([data_args.train_file])
     train_dataset = SFTDataset(train_records, tokenizer, data_args.max_seq_length)
     rprint(f"[train] {len(train_dataset)} examples")
 
-    # transformers >= 4.46 removed the `tokenizer` arg in favour of
-    # `processing_class`; fall back to `tokenizer` on older versions.
-    trainer_kwargs = dict(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        data_collator=DataCollatorForSFT(tokenizer),
+    # Place the model on this rank's device and wrap for DDP when distributed.
+    model.to(device)
+    if is_dist() and torch.cuda.is_available():
+        model = DDP(
+            model,
+            device_ids=[device.index],
+            output_device=device.index,
+            find_unused_parameters=False,
+            gradient_as_bucket_view=True,
+        )
+    base_model = model.module if hasattr(model, "module") else model
+
+    # ---- DataLoader -------------------------------------------------------
+    sampler = (DistributedSampler(train_dataset, shuffle=True, seed=training_args.seed)
+               if is_dist() else None)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=training_args.per_device_train_batch_size,
+        sampler=sampler,
+        shuffle=(sampler is None),
+        collate_fn=DataCollatorForSFT(tokenizer),
+        num_workers=getattr(training_args, "dataloader_num_workers", 0),
+        pin_memory=True,
+        drop_last=False,
     )
-    if "processing_class" in inspect.signature(Trainer.__init__).parameters:
-        trainer_kwargs["processing_class"] = tokenizer
-    else:
-        trainer_kwargs["tokenizer"] = tokenizer
-    trainer = Trainer(**trainer_kwargs)
-    if training_args.do_eval and eval_args is not None:
-        # Evaluate (generation + metrics) at the end of every epoch.
-        eval_cb = PerEpochEvalCallback(
-            tokenizer, data_args, eval_args, training_args.device)
-        # Give the callback access to the trainer so it can use the FSDP-wrapped
-        # model (model_wrapped) for generation, where parameters can be gathered.
-        eval_cb.trainer = trainer
-        trainer.add_callback(eval_cb)
-    trainer.train(resume_from_checkpoint=_detect_resume(training_args))
-    trainer.save_model(training_args.output_dir)
-    trainer.save_state()
+
+    grad_accum = max(1, training_args.gradient_accumulation_steps)
+    num_epochs = max(1, int(training_args.num_train_epochs))
+    steps_per_epoch = math.ceil(len(train_loader) / grad_accum)
+    max_steps = steps_per_epoch * num_epochs
+
+    # ---- Optimizer / scheduler -------------------------------------------
+    decay, no_decay = [], []
+    for name, p in base_model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if p.ndim < 2 or name.endswith(".bias") or "norm" in name.lower():
+            no_decay.append(p)
+        else:
+            decay.append(p)
+    optimizer = torch.optim.AdamW(
+        [
+            {"params": decay, "weight_decay": training_args.weight_decay},
+            {"params": no_decay, "weight_decay": 0.0},
+        ],
+        lr=training_args.learning_rate,
+        betas=(training_args.adam_beta1, training_args.adam_beta2),
+        eps=training_args.adam_epsilon,
+    )
+    scheduler = transformers.get_scheduler(
+        training_args.lr_scheduler_type,
+        optimizer=optimizer,
+        num_warmup_steps=training_args.get_warmup_steps(max_steps),
+        num_training_steps=max_steps,
+    )
+
+    rprint(f"[train] epochs={num_epochs} steps/epoch={steps_per_epoch} "
+           f"total_optim_steps={max_steps} grad_accum={grad_accum} "
+           f"world_size={get_world_size()}")
+
+    # ---- Training loop ----------------------------------------------------
+    log_every = int(training_args.logging_steps) if training_args.logging_steps else 0
+    global_step = 0
+    model.train()
+    for epoch in range(num_epochs):
+        rprint(f"[train] starting epoch {epoch + 1}/{num_epochs}")
+        if sampler is not None:
+            sampler.set_epoch(epoch)
+        optimizer.zero_grad(set_to_none=True)
+        micro_loss_sum, micro_count = 0.0, 0
+        n_batches = len(train_loader)
+        for step, batch in enumerate(train_loader):
+            batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+            outputs = model(**batch)
+            loss = outputs.loss / grad_accum
+
+            at_boundary = ((step + 1) % grad_accum == 0) or (step + 1 == n_batches)
+            # Avoid all-reduce on non-boundary micro-steps for DDP efficiency.
+            if isinstance(model, DDP) and not at_boundary:
+                with model.no_sync():
+                    loss.backward()
+            else:
+                loss.backward()
+
+            micro_loss_sum += loss.item() * grad_accum
+            micro_count += 1
+
+            if at_boundary:
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    [p for p in base_model.parameters() if p.requires_grad],
+                    training_args.max_grad_norm,
+                ) if training_args.max_grad_norm and training_args.max_grad_norm > 0 else None
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad(set_to_none=True)
+                global_step += 1
+
+                if log_every and global_step % log_every == 0:
+                    avg_loss = micro_loss_sum / max(1, micro_count)
+                    micro_loss_sum, micro_count = 0.0, 0
+                    lr = scheduler.get_last_lr()[0]
+                    gn = f"{float(grad_norm):.3f}" if grad_norm is not None else "n/a"
+                    rprint(f"[train] epoch {epoch + 1}/{num_epochs} "
+                           f"step {global_step}/{max_steps} "
+                           f"loss {avg_loss:.4f} lr {lr:.3e} grad_norm {gn}")
+
+        rprint(f"[train] finished epoch {epoch + 1}/{num_epochs}")
+
+        # Generation-based evaluation at the end of every epoch.
+        if training_args.do_eval and eval_args is not None:
+            _run_epoch_eval(base_model, tokenizer, data_args, eval_args,
+                            training_args, device, epoch + 1)
+            model.train()
+
+    # ---- Save -------------------------------------------------------------
+    if is_dist():
+        dist.barrier()
     if is_main():
-        tokenizer.save_pretrained(training_args.output_dir)
+        out_dir = Path(training_args.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        base_model.save_pretrained(str(out_dir))
+        tokenizer.save_pretrained(str(out_dir))
+        rprint(f"[train] saved model to {out_dir}")
+    if is_dist():
+        dist.barrier()
+
+
+def _run_epoch_eval(eval_model, tokenizer, data_args: DataArguments,
+                    eval_args: EvalArguments, training_args: TrainingArguments,
+                    device: torch.device, epoch: int) -> None:
+    """Toggle inference-friendly settings and run generation-based evaluation."""
+    was_training = eval_model.training
+    cfg = getattr(eval_model, "config", None)
+    prev_use_cache = getattr(cfg, "use_cache", None) if cfg is not None else None
+    gc_enabled = getattr(eval_model, "is_gradient_checkpointing", False)
+    try:
+        if gc_enabled:
+            eval_model.gradient_checkpointing_disable()
+        if cfg is not None:
+            cfg.use_cache = True
+        eval_model.eval()
+        run_evaluation(eval_model, tokenizer, data_args, eval_args,
+                       training_args, device, tag=f"epoch{epoch}")
+    finally:
+        if cfg is not None and prev_use_cache is not None:
+            cfg.use_cache = prev_use_cache
+        if gc_enabled:
+            eval_model.gradient_checkpointing_enable()
+        if was_training:
+            eval_model.train()
 
 
 def _detect_resume(training_args: TrainingArguments) -> Optional[bool]:
@@ -677,6 +806,7 @@ def main() -> None:
 
     if training_args.do_train:
         model = build_model(model_args, training_args)
+        print('starting the training')
         run_training(model, tokenizer, data_args, training_args, eval_args)
 
     # During training the PerEpochEvalCallback already evaluates after every
