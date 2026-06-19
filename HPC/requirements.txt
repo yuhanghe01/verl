@@ -1,0 +1,19 @@
+# Core deep learning framework
+torch>=2.1.0
+
+# Hugging Face stack (model, tokenizer, Trainer, distributed training)
+transformers>=4.45.0
+accelerate>=0.30.0
+datasets>=2.18.0
+tokenizers>=0.20.0
+sentencepiece>=0.2.0
+safetensors>=0.4.0
+
+# Parameter-efficient fine-tuning (LoRA)
+peft>=0.11.0
+
+# LLM-as-Judge evaluation (OpenAI-compatible endpoint)
+openai>=1.30.0
+
+# Optional: FlashAttention-2 (only needed with --attn_implementation flash_attention_2)
+# flash-attn>=2.5.0
