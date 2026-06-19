@@ -27,7 +27,7 @@ CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"  # GPUs to expose
 MASTER_PORT="${MASTER_PORT:-29500}"
 
 # --- model (ModelArguments) -------------------------------------------------
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-3B-Instruct}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-32B-Instruct}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
 TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-True}"
 ATTN_IMPL="${ATTN_IMPL:-sdpa}"                   # sdpa | flash_attention_2 | eager
 USE_LORA="${USE_LORA:-0}"                         # 1 = LoRA (fits 32B); 0 = full FT
@@ -37,6 +37,12 @@ LORA_DROPOUT="${LORA_DROPOUT:-0.05}"
 LORA_TARGET_MODULES="${LORA_TARGET_MODULES:-q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj}"
 
 # --- full fine-tuning (used only when USE_LORA=0) ---------------------------
+# These feed the explicit FSDP wrapper in SFT_training.run_training():
+#   FSDP           -> sharding strategy + auto_wrap (full_shard | shard_grad_op |
+#                     hybrid_shard | no_shard, optionally with "auto_wrap").
+#   FSDP_WRAP_CLS  -> transformer decoder layer class to shard per-block.
+# Full FT of a 32B model needs full_shard so params/grads/optimizer states are
+# split across the 8 GPUs (DDP would replicate everything and OOM).
 FSDP="${FSDP:-full_shard auto_wrap}"
 FSDP_WRAP_CLS="${FSDP_WRAP_CLS:-Qwen2DecoderLayer}"
 
@@ -138,9 +144,10 @@ if [[ "${USE_LORA}" == "1" ]]; then
         --lora_target_modules "${LORA_TARGET_MODULES}"
     )
 else
-    # Newer transformers removed the standalone --fsdp_transformer_layer_cls_to_wrap
-    # CLI flag; the wrap class is now provided via --fsdp_config (a JSON file)
-    # under the key "transformer_layer_cls_to_wrap".
+    # Full fine-tuning via FSDP. The custom training loop reads:
+    #   --fsdp         -> sharding strategy / auto_wrap flags
+    #   --fsdp_config  -> JSON with "transformer_layer_cls_to_wrap" (the decoder
+    #                     block class to shard per-layer).
     FSDP_CONFIG_FILE="$(mktemp -t fsdp_config.XXXXXX.json)"
     cat > "${FSDP_CONFIG_FILE}" <<EOF
 {

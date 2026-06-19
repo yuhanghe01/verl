@@ -363,9 +363,19 @@ def run_training(model, tokenizer, data_args: DataArguments,
     train_dataset = SFTDataset(train_records, tokenizer, data_args.max_seq_length)
     rprint(f"[train] {len(train_dataset)} examples")
 
-    # Place the model on this rank's device and wrap for DDP when distributed.
-    model.to(device)
-    if is_dist() and torch.cuda.is_available():
+    # Choose the parallelism wrapper:
+    #   * FSDP (full/grad-op shard) when --fsdp is passed -> needed for full
+    #     fine-tuning of large models (shards params/grads/optimizer states).
+    #   * DDP otherwise (replicates everything; fine for LoRA / small models).
+    use_fsdp = (is_dist() and torch.cuda.is_available()
+                and FSDP is not None
+                and bool(getattr(training_args, "fsdp", None)))
+    if use_fsdp:
+        # FSDP shards from CPU via ``device_id``; do NOT pre-move the full model
+        # to GPU (that would need the whole 32B on a single device).
+        model = _wrap_fsdp(model, training_args, device)
+    elif is_dist() and torch.cuda.is_available():
+        model.to(device)
         model = DDP(
             model,
             device_ids=[device.index],
@@ -373,6 +383,8 @@ def run_training(model, tokenizer, data_args: DataArguments,
             find_unused_parameters=False,
             gradient_as_bucket_view=True,
         )
+    else:
+        model.to(device)
     base_model = model.module if hasattr(model, "module") else model
 
     # ---- DataLoader -------------------------------------------------------
@@ -395,8 +407,11 @@ def run_training(model, tokenizer, data_args: DataArguments,
     max_steps = steps_per_epoch * num_epochs
 
     # ---- Optimizer / scheduler -------------------------------------------
+    # Iterate over the (possibly FSDP-wrapped) model so the optimizer tracks the
+    # sharded ``use_orig_params`` tensors under FSDP, and the replicated tensors
+    # under DDP / single-GPU.
     decay, no_decay = [], []
-    for name, p in base_model.named_parameters():
+    for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
         if p.ndim < 2 or name.endswith(".bias") or "norm" in name.lower():
@@ -451,10 +466,17 @@ def run_training(model, tokenizer, data_args: DataArguments,
             micro_count += 1
 
             if at_boundary:
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    [p for p in base_model.parameters() if p.requires_grad],
-                    training_args.max_grad_norm,
-                ) if training_args.max_grad_norm and training_args.max_grad_norm > 0 else None
+                if training_args.max_grad_norm and training_args.max_grad_norm > 0:
+                    if use_fsdp:
+                        # FSDP grads are sharded; use its collective clip helper.
+                        grad_norm = model.clip_grad_norm_(training_args.max_grad_norm)
+                    else:
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
+                            [p for p in model.parameters() if p.requires_grad],
+                            training_args.max_grad_norm,
+                        )
+                else:
+                    grad_norm = None
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -473,46 +495,130 @@ def run_training(model, tokenizer, data_args: DataArguments,
 
         # Generation-based evaluation at the end of every epoch.
         if training_args.do_eval and eval_args is not None:
-            _run_epoch_eval(base_model, tokenizer, data_args, eval_args,
-                            training_args, device, epoch + 1)
+            # FSDP needs the wrapped root for ``summon_full_params`` during
+            # generation; DDP / single-GPU can generate on the unwrapped model.
+            gen_model = model if use_fsdp else base_model
+            _run_epoch_eval(gen_model, base_model, tokenizer, data_args,
+                            eval_args, training_args, device, epoch + 1)
             model.train()
 
     # ---- Save -------------------------------------------------------------
-    if is_dist():
-        dist.barrier()
-    if is_main():
-        out_dir = Path(training_args.output_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        base_model.save_pretrained(str(out_dir))
-        tokenizer.save_pretrained(str(out_dir))
-        rprint(f"[train] saved model to {out_dir}")
+    _save_model(model, base_model, tokenizer, training_args, use_fsdp)
     if is_dist():
         dist.barrier()
 
 
-def _run_epoch_eval(eval_model, tokenizer, data_args: DataArguments,
+def _run_epoch_eval(gen_model, base_model, tokenizer, data_args: DataArguments,
                     eval_args: EvalArguments, training_args: TrainingArguments,
                     device: torch.device, epoch: int) -> None:
-    """Toggle inference-friendly settings and run generation-based evaluation."""
-    was_training = eval_model.training
-    cfg = getattr(eval_model, "config", None)
+    """Toggle inference-friendly settings and run generation-based evaluation.
+
+    ``gen_model`` is the object passed to generation (the FSDP root when
+    sharding, so its parameters can be summoned); ``base_model`` is the
+    underlying HF model used to flip ``use_cache`` / gradient checkpointing.
+    """
+    was_training = base_model.training
+    cfg = getattr(base_model, "config", None)
     prev_use_cache = getattr(cfg, "use_cache", None) if cfg is not None else None
-    gc_enabled = getattr(eval_model, "is_gradient_checkpointing", False)
+    gc_enabled = getattr(base_model, "is_gradient_checkpointing", False)
     try:
         if gc_enabled:
-            eval_model.gradient_checkpointing_disable()
+            base_model.gradient_checkpointing_disable()
         if cfg is not None:
             cfg.use_cache = True
-        eval_model.eval()
-        run_evaluation(eval_model, tokenizer, data_args, eval_args,
+        gen_model.eval()
+        run_evaluation(gen_model, tokenizer, data_args, eval_args,
                        training_args, device, tag=f"epoch{epoch}")
     finally:
         if cfg is not None and prev_use_cache is not None:
             cfg.use_cache = prev_use_cache
         if gc_enabled:
-            eval_model.gradient_checkpointing_enable()
+            base_model.gradient_checkpointing_enable()
         if was_training:
-            eval_model.train()
+            gen_model.train()
+
+
+def _wrap_fsdp(model, training_args: TrainingArguments, device: torch.device):
+    """Wrap ``model`` in FullyShardedDataParallel for sharded full fine-tuning.
+
+    Sharding strategy is taken from the ``--fsdp`` options and the transformer
+    layer class to auto-wrap from ``--fsdp_config``'s
+    ``transformer_layer_cls_to_wrap`` key.
+    """
+    import functools
+    from torch.distributed.fsdp import (
+        MixedPrecision,
+        ShardingStrategy,
+        BackwardPrefetch,
+    )
+    from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+
+    options = {str(o).lower() for o in (training_args.fsdp or [])}
+    if "shard_grad_op" in options or "_shard_grad_op" in options:
+        strategy = ShardingStrategy.SHARD_GRAD_OP
+    elif "hybrid_shard" in options:
+        strategy = ShardingStrategy.HYBRID_SHARD
+    elif "no_shard" in options:
+        strategy = ShardingStrategy.NO_SHARD
+    else:
+        strategy = ShardingStrategy.FULL_SHARD
+
+    fsdp_cfg = getattr(training_args, "fsdp_config", None) or {}
+    wrap_names = set(fsdp_cfg.get("transformer_layer_cls_to_wrap", []) or [])
+    layer_classes = {m.__class__ for m in model.modules()
+                     if m.__class__.__name__ in wrap_names}
+    auto_wrap_policy = (
+        functools.partial(transformer_auto_wrap_policy,
+                          transformer_layer_cls=layer_classes)
+        if layer_classes else None)
+    if not layer_classes and is_main():
+        rprint(f"[train][fsdp] warning: none of {sorted(wrap_names)} matched a "
+               f"module class; falling back to size-based auto-wrap.")
+
+    mp_dtype = (torch.bfloat16 if training_args.bf16
+                else (torch.float16 if training_args.fp16 else None))
+    mixed_precision = (MixedPrecision(param_dtype=mp_dtype, reduce_dtype=mp_dtype,
+                                      buffer_dtype=mp_dtype)
+                       if mp_dtype is not None else None)
+
+    rprint(f"[train][fsdp] strategy={strategy.name} "
+           f"wrap={sorted(c.__name__ for c in layer_classes) or 'size-based'} "
+           f"mixed_precision={mp_dtype}")
+    return FSDP(
+        model,
+        sharding_strategy=strategy,
+        auto_wrap_policy=auto_wrap_policy,
+        mixed_precision=mixed_precision,
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        device_id=device,
+        use_orig_params=True,
+        limit_all_gathers=True,
+    )
+
+
+def _save_model(model, base_model, tokenizer, training_args: TrainingArguments,
+                use_fsdp: bool) -> None:
+    """Save the (possibly sharded) model + tokenizer to ``output_dir``."""
+    out_dir = Path(training_args.output_dir)
+    if use_fsdp:
+        from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+        save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        # Gather the full (unsharded) state dict onto rank 0 / CPU.
+        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
+            cpu_state = model.state_dict()
+        if is_main():
+            out_dir.mkdir(parents=True, exist_ok=True)
+            base_model.save_pretrained(str(out_dir), state_dict=cpu_state)
+            tokenizer.save_pretrained(str(out_dir))
+            rprint(f"[train] saved model to {out_dir}")
+    else:
+        if is_dist():
+            dist.barrier()
+        if is_main():
+            out_dir.mkdir(parents=True, exist_ok=True)
+            base_model.save_pretrained(str(out_dir))
+            tokenizer.save_pretrained(str(out_dir))
+            rprint(f"[train] saved model to {out_dir}")
 
 
 def _detect_resume(training_args: TrainingArguments) -> Optional[bool]:
