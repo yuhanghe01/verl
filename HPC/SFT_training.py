@@ -68,6 +68,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import inspect
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
@@ -332,13 +333,19 @@ def run_training(model, tokenizer, data_args: DataArguments,
     train_dataset = SFTDataset(train_records, tokenizer, data_args.max_seq_length)
     rprint(f"[train] {len(train_dataset)} examples")
 
-    trainer = Trainer(
+    # transformers >= 4.46 removed the `tokenizer` arg in favour of
+    # `processing_class`; fall back to `tokenizer` on older versions.
+    trainer_kwargs = dict(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         data_collator=DataCollatorForSFT(tokenizer),
-        tokenizer=tokenizer,
     )
+    if "processing_class" in inspect.signature(Trainer.__init__).parameters:
+        trainer_kwargs["processing_class"] = tokenizer
+    else:
+        trainer_kwargs["tokenizer"] = tokenizer
+    trainer = Trainer(**trainer_kwargs)
     if training_args.do_eval and eval_args is not None:
         # Evaluate (generation + metrics) at the end of every epoch.
         trainer.add_callback(
