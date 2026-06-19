@@ -138,9 +138,18 @@ if [[ "${USE_LORA}" == "1" ]]; then
         --lora_target_modules "${LORA_TARGET_MODULES}"
     )
 else
+    # Newer transformers removed the standalone --fsdp_transformer_layer_cls_to_wrap
+    # CLI flag; the wrap class is now provided via --fsdp_config (a JSON file)
+    # under the key "transformer_layer_cls_to_wrap".
+    FSDP_CONFIG_FILE="$(mktemp -t fsdp_config.XXXXXX.json)"
+    cat > "${FSDP_CONFIG_FILE}" <<EOF
+{
+    "transformer_layer_cls_to_wrap": ["${FSDP_WRAP_CLS}"]
+}
+EOF
     ARGS+=(
         --fsdp "${FSDP}"
-        --fsdp_transformer_layer_cls_to_wrap "${FSDP_WRAP_CLS}"
+        --fsdp_config "${FSDP_CONFIG_FILE}"
     )
 fi
 
