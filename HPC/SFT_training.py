@@ -502,10 +502,11 @@ def run_training(model, tokenizer, data_args: DataArguments,
                             eval_args, training_args, device, epoch + 1)
             model.train()
 
-    # ---- Save -------------------------------------------------------------
-    _save_model(model, base_model, tokenizer, training_args, use_fsdp)
-    if is_dist():
-        dist.barrier()
+        # Save a separate checkpoint for this epoch under epoch_xx/.
+        _save_model(model, base_model, tokenizer, training_args, use_fsdp,
+                    epoch=epoch + 1)
+        if is_dist():
+            dist.barrier()
 
 
 def _run_epoch_eval(gen_model, base_model, tokenizer, data_args: DataArguments,
@@ -597,9 +598,15 @@ def _wrap_fsdp(model, training_args: TrainingArguments, device: torch.device):
 
 
 def _save_model(model, base_model, tokenizer, training_args: TrainingArguments,
-                use_fsdp: bool) -> None:
-    """Save the (possibly sharded) model + tokenizer to ``output_dir``."""
+                use_fsdp: bool, epoch: Optional[int] = None) -> None:
+    """Save the (possibly sharded) model + tokenizer.
+
+    When ``epoch`` is given the checkpoint is written to an ``epoch_xx``
+    subfolder of ``output_dir``; otherwise it is written to ``output_dir``.
+    """
     out_dir = Path(training_args.output_dir)
+    if epoch is not None:
+        out_dir = out_dir / f"epoch_{epoch:02d}"
     if use_fsdp:
         from torch.distributed.fsdp import FullStateDictConfig, StateDictType
         save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
