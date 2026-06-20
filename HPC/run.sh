@@ -27,7 +27,7 @@ CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"  # GPUs to expose
 MASTER_PORT="${MASTER_PORT:-29500}"
 
 # --- model (ModelArguments) -------------------------------------------------
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-32B-Instruct}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-Coder-32B-Instruct}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
 TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-True}"
 ATTN_IMPL="${ATTN_IMPL:-sdpa}"                   # sdpa | flash_attention_2 | eager
 USE_LORA="${USE_LORA:-0}"                         # 1 = LoRA (fits 32B); 0 = full FT
@@ -52,7 +52,7 @@ DEV_FILE="${DEV_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_conc
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-4096}"
 
 # --- training (transformers.TrainingArguments) ------------------------------
-OUTPUT_DIR="${OUTPUT_DIR:-/mnt/blob-data-sigmasystem-out/yuhang/SFT/HPC-Qwen2.5-32B-Instruct}"
+OUTPUT_DIR="${OUTPUT_DIR:-/mnt/blob-data-sigmasystem-out/yuhang/SFT/HPC-Qwen2.5-Coder-32B-Instruct}"
 DO_TRAIN="${DO_TRAIN:-1}"
 DO_EVAL="${DO_EVAL:-1}"
 NUM_EPOCHS="${NUM_EPOCHS:-5}"
@@ -77,7 +77,7 @@ DATALOADER_WORKERS="${DATALOADER_WORKERS:-4}"
 EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-4}"
 EVAL_MAX_NEW_TOKENS="${EVAL_MAX_NEW_TOKENS:-512}"
 CLASS_MAX_NEW_TOKENS="${CLASS_MAX_NEW_TOKENS:-32}"
-JUDGE_MODEL="${JUDGE_MODEL:-Qwen/Qwen2.5-32B-Instruct}"                    # empty = self-judge with policy model
+JUDGE_MODEL="${JUDGE_MODEL:-Qwen/Qwen2.5-Coder-32B-Instruct}"                    # empty = self-judge with policy model
 JUDGE_MAX_NEW_TOKENS="${JUDGE_MAX_NEW_TOKENS:-16}"
 JUDGE_API_BASE="${JUDGE_API_BASE:-}"             # set to use an OpenAI-compatible judge
 JUDGE_API_KEY="${JUDGE_API_KEY:-}"
