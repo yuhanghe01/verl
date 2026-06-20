@@ -47,8 +47,8 @@ FSDP="${FSDP:-full_shard auto_wrap}"
 FSDP_WRAP_CLS="${FSDP_WRAP_CLS:-Qwen2DecoderLayer}"
 
 # --- data (DataArguments) ---------------------------------------------------
-TRAIN_FILE="${TRAIN_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_concat_full_thread_materialized_evidence_v1/stage1_full_85_15/stage1_train.jsonl}"
-DEV_FILE="${DEV_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_concat_full_thread_materialized_evidence_v1/stage1_full_85_15/stage1_dev.jsonl}"
+TRAIN_FILE="${TRAIN_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_concat_full_thread_materialized_evidence_v1_plus_diagnostic/stage1_full_85_15_diag72_full/stage1_train.jsonl}"
+DEV_FILE="${DEV_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_concat_full_thread_materialized_evidence_v1_plus_diagnostic/stage1_full_85_15_diag72_full/stage1_dev.jsonl}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-4096}"
 
 # --- training (transformers.TrainingArguments) ------------------------------
