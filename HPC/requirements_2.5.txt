@@ -2,8 +2,7 @@
 torch>=2.1.0
 
 # Hugging Face stack (model, tokenizer, Trainer, distributed training)
-# Qwen3 (Qwen3ForCausalLM / Qwen3DecoderLayer) requires transformers >= 4.51.0.
-transformers>=4.51.0
+transformers>=4.45.0
 accelerate>=0.30.0
 datasets>=2.18.0
 tokenizers>=0.20.0

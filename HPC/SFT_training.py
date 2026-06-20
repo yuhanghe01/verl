@@ -150,6 +150,13 @@ class DataArguments:
     train_file: Optional[str] = field(default="stage1_full_85_15/stage1_train.jsonl")
     dev_file: Optional[str] = field(default="stage1_full_85_15/stage1_dev.jsonl")
     max_seq_length: int = field(default=4096)
+    enable_thinking: bool = field(
+        default=False,
+        metadata={"help": "Pass-through to the chat template's ``enable_thinking`` "
+                          "flag (Qwen3 hybrid-reasoning models). Keep False so the "
+                          "model is trained/evaluated on direct answers without "
+                          "<think> reasoning. Ignored by non-Qwen3 templates."},
+    )
 
 
 @dataclass
@@ -269,9 +276,11 @@ class SFTDataset(Dataset):
     """Tokenizes chat records, masking the prompt so loss is on the target only."""
 
     def __init__(self, records: List[Dict[str, Any]],
-                 tokenizer: PreTrainedTokenizerBase, max_seq_length: int):
+                 tokenizer: PreTrainedTokenizerBase, max_seq_length: int,
+                 enable_thinking: bool = False):
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
+        self.enable_thinking = enable_thinking
         # Keep only records with a final assistant target.
         self.records = [r for r in records
                         if r.get("messages") and r["messages"][-1]["role"] == "assistant"]
@@ -292,6 +301,7 @@ class SFTDataset(Dataset):
             tokenize=True,
             add_generation_prompt=add_generation_prompt,
             return_dict=False,
+            enable_thinking=self.enable_thinking,
         )
         # BatchEncoding / dict -> take the input_ids field.
         if isinstance(out, dict):
@@ -360,7 +370,8 @@ def run_training(model, tokenizer, data_args: DataArguments,
     as per-step loss / learning-rate / grad-norm can be printed directly."""
     device = maybe_init_distributed()
     train_records = load_records([data_args.train_file])
-    train_dataset = SFTDataset(train_records, tokenizer, data_args.max_seq_length)
+    train_dataset = SFTDataset(train_records, tokenizer, data_args.max_seq_length,
+                               enable_thinking=data_args.enable_thinking)
     rprint(f"[train] {len(train_dataset)} examples")
 
     # Choose the parallelism wrapper:
@@ -568,6 +579,17 @@ def _wrap_fsdp(model, training_args: TrainingArguments, device: torch.device):
     wrap_names = set(fsdp_cfg.get("transformer_layer_cls_to_wrap", []) or [])
     layer_classes = {m.__class__ for m in model.modules()
                      if m.__class__.__name__ in wrap_names}
+    if not layer_classes:
+        # The configured name (e.g. ``Qwen2DecoderLayer``) may not match the
+        # actual architecture (e.g. Qwen3 -> ``Qwen3DecoderLayer``). Fall back
+        # to auto-detecting any transformer decoder-layer class by name so the
+        # correct per-block sharding is still applied.
+        layer_classes = {m.__class__ for m in model.modules()
+                         if m.__class__.__name__.endswith("DecoderLayer")}
+        if layer_classes and is_main():
+            rprint(f"[train][fsdp] configured {sorted(wrap_names)} did not match; "
+                   f"auto-detected decoder layers "
+                   f"{sorted(c.__name__ for c in layer_classes)}.")
     auto_wrap_policy = (
         functools.partial(transformer_auto_wrap_policy,
                           transformer_layer_cls=layer_classes)
@@ -699,21 +721,24 @@ def _generate_batch(model, tokenizer, prompts: List[str], device: torch.device,
     return tokenizer.batch_decode(gen, skip_special_tokens=True)
 
 
-def _render_prompt(tokenizer, messages: List[Dict[str, str]]) -> str:
+def _render_prompt(tokenizer, messages: List[Dict[str, str]],
+                   enable_thinking: bool = False) -> str:
     return tokenizer.apply_chat_template(
-        messages[:-1], tokenize=False, add_generation_prompt=True)
+        messages[:-1], tokenize=False, add_generation_prompt=True,
+        enable_thinking=enable_thinking)
 
 
 def run_generation(model, tokenizer, records: List[Dict[str, Any]],
                    device: torch.device, batch_size: int,
-                   max_new_tokens: int) -> List[Dict[str, Any]]:
+                   max_new_tokens: int, enable_thinking: bool = False) -> List[Dict[str, Any]]:
     """Shard `records` across ranks, generate, return per-record predictions."""
     rank, world = get_rank(), get_world_size()
     shard = records[rank::world]
     results: List[Dict[str, Any]] = []
     for i in range(0, len(shard), batch_size):
         batch = shard[i:i + batch_size]
-        prompts = [_render_prompt(tokenizer, r["messages"]) for r in batch]
+        prompts = [_render_prompt(tokenizer, r["messages"], enable_thinking)
+                   for r in batch]
         preds = _generate_batch(model, tokenizer, prompts, device, max_new_tokens)
         for r, p in zip(batch, preds):
             results.append({
@@ -757,7 +782,7 @@ def _parse_score(text: str) -> Optional[float]:
 
 
 def judge_local(model, tokenizer, pairs: List[Dict[str, Any]], device: torch.device,
-                eval_args: EvalArguments) -> List[float]:
+                eval_args: EvalArguments, enable_thinking: bool = False) -> List[float]:
     """Self/local-model judge. Shards across ranks like generation."""
     rank, world = get_rank(), get_world_size()
     idx = list(range(len(pairs)))
@@ -770,7 +795,8 @@ def judge_local(model, tokenizer, pairs: List[Dict[str, Any]], device: torch.dev
             tokenizer.apply_chat_template(
                 _judge_prompt_messages(pairs[j]["user"], pairs[j]["reference"],
                                        pairs[j]["prediction"]),
-                tokenize=False, add_generation_prompt=True)
+                tokenize=False, add_generation_prompt=True,
+                enable_thinking=enable_thinking)
             for j in chunk
         ]
         outs = _generate_batch(model, tokenizer, prompts, device,
@@ -814,9 +840,11 @@ def run_evaluation(model, tokenizer, data_args: DataArguments,
     gen_records = [r for r in records if r.get("task_type") not in CLASSIFICATION_TASKS]
 
     class_preds = run_generation(model, tokenizer, class_records, device,
-                                 eval_args.eval_batch_size, eval_args.class_max_new_tokens)
+                                 eval_args.eval_batch_size, eval_args.class_max_new_tokens,
+                                 enable_thinking=data_args.enable_thinking)
     gen_preds = run_generation(model, tokenizer, gen_records, device,
-                               eval_args.eval_batch_size, eval_args.eval_max_new_tokens)
+                               eval_args.eval_batch_size, eval_args.eval_max_new_tokens,
+                               enable_thinking=data_args.enable_thinking)
 
     # 2a) Classification -> Accuracy.
     correct = 0
@@ -831,7 +859,8 @@ def run_evaluation(model, tokenizer, data_args: DataArguments,
     # 2b) Non-classification -> LLM-as-Judge similarity.
     # API-based judge is forcefully disabled; always use the local self-judge.
     if gen_preds:
-        judge_scores = judge_local(model, tokenizer, gen_preds, device, eval_args)
+        judge_scores = judge_local(model, tokenizer, gen_preds, device, eval_args,
+                                   enable_thinking=data_args.enable_thinking)
         for item, s in zip(gen_preds, judge_scores):
             item["judge_score"] = s
         judge_mean = sum(judge_scores) / len(judge_scores)

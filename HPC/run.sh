@@ -27,7 +27,7 @@ CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"  # GPUs to expose
 MASTER_PORT="${MASTER_PORT:-29500}"
 
 # --- model (ModelArguments) -------------------------------------------------
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-Coder-32B-Instruct}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-32B}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
 TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-True}"
 ATTN_IMPL="${ATTN_IMPL:-sdpa}"                   # sdpa | flash_attention_2 | eager
 USE_LORA="${USE_LORA:-0}"                         # 1 = LoRA (fits 32B); 0 = full FT
@@ -44,7 +44,8 @@ LORA_TARGET_MODULES="${LORA_TARGET_MODULES:-q_proj,k_proj,v_proj,o_proj,gate_pro
 # Full FT of a 32B model needs full_shard so params/grads/optimizer states are
 # split across the 8 GPUs (DDP would replicate everything and OOM).
 FSDP="${FSDP:-full_shard auto_wrap}"
-FSDP_WRAP_CLS="${FSDP_WRAP_CLS:-Qwen2DecoderLayer}"
+FSDP_WRAP_CLS="${FSDP_WRAP_CLS:-Qwen3DecoderLayer}"   # Qwen3-32B; use Qwen2DecoderLayer for Qwen2.5
+# FSDP_WRAP_CLS="${FSDP_WRAP_CLS:-Qwen2DecoderLayer}"
 
 # --- data (DataArguments) ---------------------------------------------------
 TRAIN_FILE="${TRAIN_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_concat_full_thread_materialized_evidence_v1_plus_diagnostic/stage1_full_85_15_diag72_full/stage1_train.jsonl}"
@@ -52,7 +53,7 @@ DEV_FILE="${DEV_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_conc
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-4096}"
 
 # --- training (transformers.TrainingArguments) ------------------------------
-OUTPUT_DIR="${OUTPUT_DIR:-/mnt/blob-data-sigmasystem-out/yuhang/SFT/HPC-Qwen2.5-Coder-32B-Instruct}"
+OUTPUT_DIR="${OUTPUT_DIR:-/mnt/blob-data-sigmasystem-out/yuhang/SFT/Qwen3-32B}"
 DO_TRAIN="${DO_TRAIN:-1}"
 DO_EVAL="${DO_EVAL:-1}"
 NUM_EPOCHS="${NUM_EPOCHS:-5}"
@@ -77,7 +78,7 @@ DATALOADER_WORKERS="${DATALOADER_WORKERS:-4}"
 EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-4}"
 EVAL_MAX_NEW_TOKENS="${EVAL_MAX_NEW_TOKENS:-512}"
 CLASS_MAX_NEW_TOKENS="${CLASS_MAX_NEW_TOKENS:-32}"
-JUDGE_MODEL="${JUDGE_MODEL:-Qwen/Qwen2.5-Coder-32B-Instruct}"                    # empty = self-judge with policy model
+JUDGE_MODEL="${JUDGE_MODEL:-Qwen/Qwen3-32B}"                    # empty = self-judge with policy model
 JUDGE_MAX_NEW_TOKENS="${JUDGE_MAX_NEW_TOKENS:-16}"
 JUDGE_API_BASE="${JUDGE_API_BASE:-}"             # set to use an OpenAI-compatible judge
 JUDGE_API_KEY="${JUDGE_API_KEY:-}"
@@ -95,6 +96,9 @@ JUDGE_API_MODEL="${JUDGE_API_MODEL:-gpt-4o-mini}"
 # cd "${PROJECT_DIR}"
 export CUDA_VISIBLE_DEVICES="${CUDA_DEVICES}"
 export TOKENIZERS_PARALLELISM=false
+
+# Create the output directory if it does not already exist.
+mkdir -p "${OUTPUT_DIR}"
 
 # ----------------------------------------------------------------------------
 # Assemble arguments
