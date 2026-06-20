@@ -26,9 +26,35 @@ NUM_GPUS="${NUM_GPUS:-8}"                         # processes for torchrun
 CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"  # GPUs to expose
 MASTER_PORT="${MASTER_PORT:-29500}"
 
-# --- model (ModelArguments) -------------------------------------------------
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-32B}"   # or Qwen/Qwen2.5-Coder-32B-Instruct
+# --- models (ModelArguments) ------------------------------------------------
+# Base models fine-tuned one after another. Each run writes to its own
+# OUTPUT_DIR (see OUTPUT_BASE below). Override the whole list with e.g.:
+#   MODELS="Qwen/Qwen3-32B Qwen/Qwen3-30B-A3B-Instruct-2507" bash run.sh
+MODELS_DEFAULT=(
+    "Qwen/Qwen3-32B"
+    "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+    "Qwen/Qwen3-Coder-Next"
+    "Qwen/Qwen3-30B-A3B-Thinking-2507"
+    "Qwen/Qwen3-30B-A3B-Instruct-2507"
+)
+if [[ -n "${MODELS:-}" ]]; then
+    read -r -a MODELS_ARR <<< "${MODELS}"
+else
+    MODELS_ARR=("${MODELS_DEFAULT[@]}")
+fi
+CONTINUE_ON_ERROR="${CONTINUE_ON_ERROR:-1}"   # 1 = keep going if a model run fails
 TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-True}"
+
+# Map a model id to the transformer decoder-layer class FSDP should wrap.
+# Dense (Qwen3-32B) -> Qwen3DecoderLayer; MoE (A3B) -> Qwen3MoeDecoderLayer;
+# Qwen3-Next -> Qwen3NextDecoderLayer.
+fsdp_wrap_cls_for() {
+    case "$1" in
+        *Next*)            echo "Qwen3NextDecoderLayer" ;;
+        *A3B*|*Moe*|*MoE*) echo "Qwen3MoeDecoderLayer" ;;
+        *)                 echo "Qwen3DecoderLayer" ;;
+    esac
+}
 ATTN_IMPL="${ATTN_IMPL:-sdpa}"                   # sdpa | flash_attention_2 | eager
 USE_LORA="${USE_LORA:-0}"                         # 1 = LoRA (fits 32B); 0 = full FT
 LORA_R="${LORA_R:-16}"
@@ -44,8 +70,9 @@ LORA_TARGET_MODULES="${LORA_TARGET_MODULES:-q_proj,k_proj,v_proj,o_proj,gate_pro
 # Full FT of a 32B model needs full_shard so params/grads/optimizer states are
 # split across the 8 GPUs (DDP would replicate everything and OOM).
 FSDP="${FSDP:-full_shard auto_wrap}"
-FSDP_WRAP_CLS="${FSDP_WRAP_CLS:-Qwen3DecoderLayer}"   # Qwen3-32B; use Qwen2DecoderLayer for Qwen2.5
-# FSDP_WRAP_CLS="${FSDP_WRAP_CLS:-Qwen2DecoderLayer}"
+# Leave FSDP_WRAP_CLS empty to auto-derive per model (dense/MoE/Next). Set it to
+# force a single class for every model in the list.
+FSDP_WRAP_CLS="${FSDP_WRAP_CLS:-}"
 
 # --- data (DataArguments) ---------------------------------------------------
 TRAIN_FILE="${TRAIN_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_concat_full_thread_materialized_evidence_v1_plus_diagnostic/stage1_full_85_15_diag72_full/stage1_train.jsonl}"
@@ -53,10 +80,11 @@ DEV_FILE="${DEV_FILE:-/mnt/blob-data-sigmasystem/xuehui/sft_training_format_conc
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-4096}"
 
 # --- training (transformers.TrainingArguments) ------------------------------
-OUTPUT_DIR="${OUTPUT_DIR:-/mnt/blob-data-sigmasystem-out/yuhang/SFT/Qwen3-32B}"
+# Per-model output is OUTPUT_BASE/<model basename> (set inside the loop below).
+OUTPUT_BASE="${OUTPUT_BASE:-/mnt/blob-data-sigmasystem-out/yuhang/SFT}"
 DO_TRAIN="${DO_TRAIN:-1}"
 DO_EVAL="${DO_EVAL:-1}"
-NUM_EPOCHS="${NUM_EPOCHS:-5}"
+NUM_EPOCHS="${NUM_EPOCHS:-10}"
 PER_DEVICE_TRAIN_BS="${PER_DEVICE_TRAIN_BS:-4}"
 GRAD_ACCUM="${GRAD_ACCUM:-4}"
 LEARNING_RATE="${LEARNING_RATE:-1e-4}"
@@ -76,7 +104,7 @@ DATALOADER_WORKERS="${DATALOADER_WORKERS:-4}"
 
 # --- evaluation (EvalArguments) ---------------------------------------------
 EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-4}"
-EVAL_MAX_NEW_TOKENS="${EVAL_MAX_NEW_TOKENS:-512}"
+EVAL_MAX_NEW_TOKENS="${EVAL_MAX_NEW_TOKENS:-1024}"
 CLASS_MAX_NEW_TOKENS="${CLASS_MAX_NEW_TOKENS:-32}"
 JUDGE_MODEL="${JUDGE_MODEL:-Qwen/Qwen3-32B}"                    # empty = self-judge with policy model
 JUDGE_MAX_NEW_TOKENS="${JUDGE_MAX_NEW_TOKENS:-16}"
@@ -97,20 +125,15 @@ JUDGE_API_MODEL="${JUDGE_API_MODEL:-gpt-4o-mini}"
 export CUDA_VISIBLE_DEVICES="${CUDA_DEVICES}"
 export TOKENIZERS_PARALLELISM=false
 
-# Create the output directory if it does not already exist.
-mkdir -p "${OUTPUT_DIR}"
-
 # ----------------------------------------------------------------------------
-# Assemble arguments
+# Assemble the arguments shared by every model run.
 # ----------------------------------------------------------------------------
-ARGS=(
-    --model_name_or_path "${MODEL_NAME}"
+COMMON_ARGS=(
     --trust_remote_code "${TRUST_REMOTE_CODE}"
     --attn_implementation "${ATTN_IMPL}"
     --train_file "${TRAIN_FILE}"
     --dev_file "${DEV_FILE}"
     --max_seq_length "${MAX_SEQ_LENGTH}"
-    --output_dir "${OUTPUT_DIR}"
     --num_train_epochs "${NUM_EPOCHS}"
     --per_device_train_batch_size "${PER_DEVICE_TRAIN_BS}"
     --gradient_accumulation_steps "${GRAD_ACCUM}"
@@ -135,53 +158,83 @@ ARGS=(
     --judge_api_model "${JUDGE_API_MODEL}"
 )
 
-[[ "${DO_TRAIN}" == "1" ]] && ARGS+=(--do_train)
-[[ "${DO_EVAL}"  == "1" ]] && ARGS+=(--do_eval)
+[[ "${DO_TRAIN}" == "1" ]] && COMMON_ARGS+=(--do_train)
+[[ "${DO_EVAL}"  == "1" ]] && COMMON_ARGS+=(--do_eval)
 
-# LoRA vs. full fine-tuning (FSDP)
-if [[ "${USE_LORA}" == "1" ]]; then
-    ARGS+=(
-        --use_lora
-        --lora_r "${LORA_R}"
-        --lora_alpha "${LORA_ALPHA}"
-        --lora_dropout "${LORA_DROPOUT}"
-        --lora_target_modules "${LORA_TARGET_MODULES}"
+# Optional judge overrides (shared across runs).
+[[ -n "${JUDGE_MODEL}"    ]] && COMMON_ARGS+=(--judge_model "${JUDGE_MODEL}")
+[[ -n "${JUDGE_API_BASE}" ]] && COMMON_ARGS+=(--judge_api_base "${JUDGE_API_BASE}")
+[[ -n "${JUDGE_API_KEY}"  ]] && COMMON_ARGS+=(--judge_api_key "${JUDGE_API_KEY}")
+
+# Clean up the temporary FSDP config files on exit.
+FSDP_CONFIG_FILES=()
+cleanup() { for f in "${FSDP_CONFIG_FILES[@]:-}"; do [[ -n "${f}" ]] && rm -f "${f}"; done; }
+trap cleanup EXIT
+
+# ----------------------------------------------------------------------------
+# Iterate over every base model.
+# ----------------------------------------------------------------------------
+for MODEL_NAME in "${MODELS_ARR[@]}"; do
+    # Per-model output directory: <OUTPUT_BASE>/<model basename>.
+    MODEL_TAG="${MODEL_NAME##*/}"
+    OUTPUT_DIR="${OUTPUT_BASE}/${MODEL_TAG}"
+    mkdir -p "${OUTPUT_DIR}"
+
+    # Per-model args start from the shared set plus this model's specifics.
+    ARGS=(
+        --model_name_or_path "${MODEL_NAME}"
+        --output_dir "${OUTPUT_DIR}"
+        "${COMMON_ARGS[@]}"
     )
-else
-    # Full fine-tuning via FSDP. The custom training loop reads:
-    #   --fsdp         -> sharding strategy / auto_wrap flags
-    #   --fsdp_config  -> JSON with "transformer_layer_cls_to_wrap" (the decoder
-    #                     block class to shard per-layer).
-    FSDP_CONFIG_FILE="$(mktemp -t fsdp_config.XXXXXX.json)"
-    cat > "${FSDP_CONFIG_FILE}" <<EOF
+
+    # LoRA vs. full fine-tuning (FSDP)
+    if [[ "${USE_LORA}" == "1" ]]; then
+        ARGS+=(
+            --use_lora
+            --lora_r "${LORA_R}"
+            --lora_alpha "${LORA_ALPHA}"
+            --lora_dropout "${LORA_DROPOUT}"
+            --lora_target_modules "${LORA_TARGET_MODULES}"
+        )
+        wrap_cls="n/a"
+    else
+        # Full fine-tuning via FSDP. The decoder-layer class to shard per-block
+        # depends on the architecture (dense / MoE / Qwen3-Next): derive it from
+        # the model name unless FSDP_WRAP_CLS forces one for all models.
+        if [[ -n "${FSDP_WRAP_CLS}" ]]; then
+            wrap_cls="${FSDP_WRAP_CLS}"
+        else
+            wrap_cls="$(fsdp_wrap_cls_for "${MODEL_NAME}")"
+        fi
+        FSDP_CONFIG_FILE="$(mktemp -t fsdp_config.XXXXXX.json)"
+        FSDP_CONFIG_FILES+=("${FSDP_CONFIG_FILE}")
+        cat > "${FSDP_CONFIG_FILE}" <<EOF
 {
-    "transformer_layer_cls_to_wrap": ["${FSDP_WRAP_CLS}"]
+    "transformer_layer_cls_to_wrap": ["${wrap_cls}"]
 }
 EOF
-    ARGS+=(
-        --fsdp "${FSDP}"
-        --fsdp_config "${FSDP_CONFIG_FILE}"
-    )
-fi
+        ARGS+=(
+            --fsdp "${FSDP}"
+            --fsdp_config "${FSDP_CONFIG_FILE}"
+        )
+    fi
 
-# Optional judge overrides
-[[ -n "${JUDGE_MODEL}"    ]] && ARGS+=(--judge_model "${JUDGE_MODEL}")
-[[ -n "${JUDGE_API_BASE}" ]] && ARGS+=(--judge_api_base "${JUDGE_API_BASE}")
-[[ -n "${JUDGE_API_KEY}"  ]] && ARGS+=(--judge_api_key "${JUDGE_API_KEY}")
+    # ------------------------------------------------------------------------
+    # Launch this model's run.
+    # ------------------------------------------------------------------------
+    echo "================ SFT launch ================"
+    echo "  model       : ${MODEL_NAME}"
+    echo "  GPUs        : ${CUDA_DEVICES}  (nproc=${NUM_GPUS})"
+    echo "  mode        : $( [[ ${USE_LORA} == 1 ]] && echo LoRA || echo "full FT (FSDP, wrap=${wrap_cls})" )"
+    echo "  output_dir  : ${OUTPUT_DIR}"
+    echo "  do_train=${DO_TRAIN}  do_eval=${DO_EVAL}"
+    echo "============================================"
 
-# ----------------------------------------------------------------------------
-# Launch
-# ----------------------------------------------------------------------------
-echo "================ SFT launch ================"
-# echo "  env         : ${CONDA_ENV}"
-echo "  model       : ${MODEL_NAME}"
-echo "  GPUs        : ${CUDA_DEVICES}  (nproc=${NUM_GPUS})"
-echo "  mode        : $( [[ ${USE_LORA} == 1 ]] && echo LoRA || echo 'full FT (FSDP)' )"
-echo "  output_dir  : ${OUTPUT_DIR}"
-echo "  do_train=${DO_TRAIN}  do_eval=${DO_EVAL}"
-echo "============================================"
-
-torchrun \
-    --nproc_per_node="${NUM_GPUS}" \
-    --master_port="${MASTER_PORT}" \
-    "${SCRIPT_DIR}/SFT_training.py" "${ARGS[@]}"
+    if ! torchrun \
+            --nproc_per_node="${NUM_GPUS}" \
+            --master_port="${MASTER_PORT}" \
+            "${SCRIPT_DIR}/SFT_training.py" "${ARGS[@]}"; then
+        echo "[WARN] run failed for ${MODEL_NAME}"
+        [[ "${CONTINUE_ON_ERROR}" == "1" ]] || exit 1
+    fi
+done

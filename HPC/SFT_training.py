@@ -690,6 +690,28 @@ def _match_label(prediction: str, labels: List[str]) -> str:
     return prediction.strip()
 
 
+def _sdpa_no_cudnn_ctx():
+    """Context manager that disables the cuDNN SDPA backend for the enclosed
+    block, falling back to FlashAttention / memory-efficient / math kernels.
+
+    The cuDNN scaled-dot-product-attention backend can fail during generation
+    with ``RuntimeError: Expected mha_graph.execute(...).is_good() to be true``
+    on some GPU/driver/cuDNN combinations (notably Qwen3's head_dim + GQA while
+    decoding). Excluding it keeps generation on the stable backends.
+    """
+    try:
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+    except Exception:  # pragma: no cover - older torch without the public API
+        return contextlib.nullcontext()
+    backends = [SDPBackend.FLASH_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION,
+                SDPBackend.MATH]
+    try:
+        return sdpa_kernel(backends, set_priority=True)
+    except TypeError:  # older signature without set_priority
+        return sdpa_kernel(backends)
+
+
 @torch.no_grad()
 def _generate_batch(model, tokenizer, prompts: List[str], device: torch.device,
                     max_new_tokens: int) -> List[str]:
@@ -707,7 +729,7 @@ def _generate_batch(model, tokenizer, prompts: List[str], device: torch.device,
     else:
         gather_ctx = contextlib.nullcontext()
 
-    with gather_ctx:
+    with gather_ctx, _sdpa_no_cudnn_ctx():
         base = model.module if hasattr(model, "module") else model
         out = base.generate(
             **enc,
